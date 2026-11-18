@@ -16,7 +16,7 @@ export function CategoryColorPicker({
   const selected = CATEGORY_COLOR_PRESETS.find(({ hex }) => hex.toUpperCase() === hexValue);
 
   return (
-    <fieldset className="category-colors" disabled={disabled}>
+    <fieldset className="category-picker" disabled={disabled}>
       <legend className="field-label">Colore della categoria</legend>
       <div className="swatch-row">
         {CATEGORY_COLOR_PRESETS.map(({ label, hex }) => (

@@ -1,9 +1,10 @@
 import { ArrowDown, ArrowUp, ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import { CUSTOM_CATEGORY_ICONS, DEFAULT_CATEGORY_COLOR } from '../lib/categories';
+import { DEFAULT_CATEGORY_COLOR } from '../lib/categories';
 import { translateErrorIT } from '../lib/supabase';
 import type { CategoryOption, CategoryPatch } from '../types';
 import { CategoryColorPicker } from './CategoryColorPicker';
+import { CategoryIconPicker } from './CategoryIconPicker';
 import { CategoryIcon } from './Icon';
 
 export interface CategoryManagerProps {
@@ -182,23 +183,13 @@ function CategoryEditor({
           autoFocus
         />
       </label>
-      <div className="category-appearance">
-        <CategoryIcon icon={icon} color={color} boxed />
-        <label className="field">
-          <span className="field-label">Icona</span>
-          <select
-            className="select select-sm"
-            value={icon}
-            onChange={(e) => setIcon(e.target.value)}
-          >
-            {CUSTOM_CATEGORY_ICONS.map((i) => (
-              <option key={i.id} value={i.id}>
-                {i.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <CategoryIconPicker
+        value={icon}
+        color={color}
+        onChange={setIcon}
+        disabled={busy}
+        savedIcon={initial?.icon}
+      />
       <CategoryColorPicker value={color} onChange={setColor} disabled={busy} />
       {initial && (
         <label className="category-visibility">

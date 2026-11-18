@@ -110,6 +110,8 @@ it.each([
     change('Importo della spesa', '10');
     click('Nuova');
     change('Nome della categoria', 'Lingue');
+    const icons = within(screen.getByRole('group', { name: 'Icona della categoria' }));
+    fireEvent.click(icons.getByRole('radio', { name: 'Libri e studio' }));
     const { group, picker } = colorControls();
     fireEvent.click(group.getByRole('radio', { name: 'Arancione' }));
     if (kind === 'personalizzato') {
@@ -117,9 +119,10 @@ it.each([
       expect(group.queryByRole('radio', { checked: true })).toBeNull();
     }
     expect(picker.value).toBe(color.toLowerCase());
+    expect(icons.getByRole('radio', { name: 'Libri e studio', checked: true })).toBeTruthy();
     click('Aggiungi');
     await waitFor(() => expect(screen.queryByLabelText('Nome della categoria')).toBeNull());
-    const created = { name: 'Lingue', icon: 'tag', color };
+    const created = { name: 'Lingue', icon: 'book-open', color };
     expect(create).toHaveBeenCalledWith(created);
     rerender(
       <ExpenseFormModal
