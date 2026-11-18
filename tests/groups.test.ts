@@ -218,3 +218,150 @@ describe('Gruppi BauSplit su PostgreSQL con accessi distinti', () => {
     });
   });
 });
+
+const catalog = async (group: string) =>
+  (
+    await db.query<{ key: string; name: string; hidden: boolean }>(
+      'select * from get_group_categories($1)',
+      [group]
+    )
+  ).rows;
+const saveCategory = async (
+  group: string,
+  key: string | null,
+  name: string | null,
+  hidden: boolean | null = null
+) =>
+  (
+    await first<{ key: string }>('select save_group_category($1,$2,$3,p_hidden => $4) as key', [
+      group,
+      key,
+      name,
+      hidden,
+    ])
+  ).key;
+
+describe('Catalogo categorie del gruppo', () => {
+  it('rinomina per chiave, conserva dati e storico e sincronizza ordine e visibilità anche dopo un secondo Run', async () => {
+    await as(guest);
+    const a = await createGroup('Giappone');
+    const b = await createGroup('Casa');
+    const me = await member(a.id, guest);
+    const original = await catalog(a.id);
+    expect(original.map((c) => c.name)).toEqual([
+      'Spesa alimentare',
+      'Ristoranti e bar',
+      'Casa e affitto',
+      'Bollette e utenze',
+      'Trasporti e auto',
+      'Viaggi e alloggi',
+      'Svago e cultura',
+      'Shopping',
+      'Salute e benessere',
+      'Abbonamenti',
+      'Regali',
+      'Altro',
+    ]);
+    const custom = await saveCategory(a.id, null, 'Animali');
+    expect(custom).toMatch(/^custom:/);
+    await db.query(
+      `select save_expense($1,null,'Mercato',16000,'JPY',0.00625,'2026-09-01',true,100,'2026-09-01',
+      'spesa','Spesa alimentare',$2,'equal','',$3,'created','Spesa registrata','{"snapshot":{"Categoria":"Spesa alimentare"}}')`,
+      [a.id, me.user_id, JSON.stringify([{ user_id: me.user_id, amount: 16000, base_amount: 100 }])]
+    );
+    await db.query(
+      `insert into recurring_expenses(group_id,description,amount,currency,category,category_label,paid_by,split_mode,splits,
+      frequency,start_date,next_due_date,created_by,updated_by) values ($1,'Crocchette',10,'EUR',$2,'Animali',$3,'equal','[]','monthly',current_date,current_date,$4,$4)`,
+      [a.id, custom, me.user_id, guest]
+    );
+
+    await as(friend);
+    await join(a.invite_token, null, 'Mira');
+    await db.query("select save_group_category($1,'spesa','Dispensa','home','#BE185D',true)", [
+      a.id,
+    ]);
+    await saveCategory(a.id, custom, 'Gatto');
+    await db.query('select move_group_category($1,$2,1)', [a.id, 'spesa']);
+    await db.exec('reset role');
+    await db.exec(schema);
+    await as(guest);
+    const updated = await catalog(a.id);
+    expect(updated[1]).toEqual({
+      key: 'spesa',
+      name: 'Dispensa',
+      icon: 'home',
+      color: '#BE185D',
+      hidden: true,
+    });
+    expect(updated.find((c) => c.key === custom)?.name).toBe('Gatto');
+    expect(await catalog(b.id)).toEqual(original);
+    expect(
+      await first(
+        'select category,category_label,amount,base_amount,exchange_rate from expenses where group_id=$1',
+        [a.id]
+      )
+    ).toEqual({
+      category: 'spesa',
+      category_label: 'Spesa alimentare',
+      amount: '16000.00',
+      base_amount: '100.00',
+      exchange_rate: '0.00625000',
+    });
+    expect(
+      await first('select category,category_label from recurring_expenses where group_id=$1', [
+        a.id,
+      ])
+    ).toEqual({ category: custom, category_label: 'Animali' });
+    expect(
+      await first(
+        "select changes->'snapshot'->>'Categoria' as label from activity_logs where group_id=$1 and entity_type='expense'",
+        [a.id]
+      )
+    ).toEqual({ label: 'Spesa alimentare' });
+    expect(
+      await first(
+        "select actor_id,summary from activity_logs where group_id=$1 and summary like '%Dispensa%'",
+        [a.id]
+      )
+    ).toEqual({
+      actor_id: friend,
+      summary: 'Ha rinominato la categoria "Spesa alimentare" in "Dispensa"',
+    });
+    await expect(db.query('select delete_group_category($1,$2)', [a.id, custom])).rejects.toThrow(
+      /nasconderla/
+    );
+    await saveCategory(a.id, 'spesa', null, false);
+    expect((await catalog(a.id))[1]).toMatchObject({ name: 'Dispensa', hidden: false });
+  });
+
+  it('controlla accesso, gruppo chiuso, chiavi, duplicati e ultima categoria visibile', async () => {
+    await as(guest);
+    const a = await createGroup('Uno');
+    const b = await createGroup('Due');
+    const custom = await saveCategory(a.id, null, 'Nuoto');
+    await expect(saveCategory(b.id, custom, 'Altrove')).rejects.toThrow(/non trovata/);
+    await expect(saveCategory(a.id, null, '  shopping  ')).rejects.toThrow(/già una categoria/);
+    await expect(saveCategory(a.id, custom, 'Regali')).rejects.toThrow(/già una categoria/);
+    await expect(saveCategory(a.id, 'altro', ' ')).rejects.toThrow(/nome/);
+    for (const c of await catalog(a.id))
+      if (c.key !== custom) await saveCategory(a.id, c.key, null, true);
+    await expect(saveCategory(a.id, custom, null, true)).rejects.toThrow(/almeno una/);
+    await expect(db.query('select delete_group_category($1,$2)', [a.id, custom])).rejects.toThrow(
+      /almeno una/
+    );
+    await saveCategory(a.id, 'altro', null, false);
+    await db.query('select delete_group_category($1,$2)', [a.id, custom]);
+    expect((await catalog(a.id)).some((c) => c.key === custom)).toBe(false);
+    await as(outsider);
+    expect(await catalog(a.id)).toEqual([]);
+    await expect(saveCategory(a.id, 'altro', 'Mio')).rejects.toThrow(/Accesso/);
+    await expect(db.query('select move_group_category($1,$2,1)', [a.id, 'altro'])).rejects.toThrow(
+      /Accesso/
+    );
+    await as(guest);
+    await db.query('select close_expense_group($1)', [a.id]);
+    expect(await catalog(a.id)).toHaveLength(12);
+    await expect(saveCategory(a.id, null, 'Pulizie')).rejects.toThrow(/chiuso/);
+    await expect(saveCategory(a.id, 'altro', 'Mio')).rejects.toThrow(/chiuso/);
+  });
+});

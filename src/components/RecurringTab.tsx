@@ -11,19 +11,20 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { computeExpenseSplits, roundCurrency } from '../lib/accounting';
 import { SPLIT_MODE_LABELS } from '../lib/audit';
-import { buildCategoryOptions, resolveCategoryDisplay } from '../lib/categories';
+import { entryCategories, resolveCategoryDisplay } from '../lib/categories';
 import {
   CURRENCIES,
   formatMoney,
-  formatNumberIT,
+  formatDecimalInput,
   getCurrencyInfo,
   parseDecimalInput,
 } from '../lib/currencies';
 import { formatFullDateIT, todayISO } from '../lib/dates';
 import { FREQUENCY_LABELS, FREQUENCY_OPTIONS } from '../lib/recurring';
 import { translateErrorIT } from '../lib/supabase';
+import { canonicalRate, directQuote } from '../lib/rateQuote';
 import type {
-  CustomCategory,
+  CategoryOption,
   GroupMember,
   RecurringExpense,
   RecurringExpenseInput,
@@ -32,6 +33,7 @@ import type {
 } from '../types';
 import { Avatar, CategoryIcon } from './Icon';
 import { Modal } from './Modal';
+import { RateInput } from './RateInput';
 
 interface RecurringTabProps {
   groupId: string;
@@ -39,7 +41,7 @@ interface RecurringTabProps {
   baseCurrency: string;
   currentUserId: string;
   members: GroupMember[];
-  customCategories: CustomCategory[];
+  categories: CategoryOption[];
   recurringExpenses: RecurringExpense[];
   nameOf: (userId: string) => string;
   onSaveRecurring: (input: RecurringExpenseInput, before?: RecurringExpense) => Promise<void>;
@@ -55,7 +57,7 @@ export function RecurringTab({
   baseCurrency,
   currentUserId,
   members,
-  customCategories,
+  categories: catalog,
   recurringExpenses,
   nameOf,
   onSaveRecurring,
@@ -64,14 +66,7 @@ export function RecurringTab({
   onDeleteRecurring,
   onToast,
 }: RecurringTabProps) {
-  const activeMembers = useMemo(
-    () => members.filter((m) => m.leftAt === null),
-    [members]
-  );
-  const categories = useMemo(
-    () => buildCategoryOptions(customCategories),
-    [customCategories]
-  );
+  const activeMembers = useMemo(() => members.filter((m) => m.leftAt === null), [members]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
@@ -82,7 +77,7 @@ export function RecurringTab({
   const [description, setDescription] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [currency, setCurrency] = useState(baseCurrency);
-  const [fixedRateStr, setFixedRateStr] = useState('');
+  const [fixedQuote, setFixedQuote] = useState(() => directQuote(null));
   const [categoryKey, setCategoryKey] = useState('casa');
   const [paidBy, setPaidBy] = useState(currentUserId);
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
@@ -95,6 +90,10 @@ export function RecurringTab({
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const categories = useMemo(() => entryCategories(catalog, editing), [catalog, editing]);
+  const selectedCategory = categories.find((c) => c.key === categoryKey);
+
+  // La sincronizzazione non deve resettare i campi già compilati.
   const initializedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -112,11 +111,9 @@ export function RecurringTab({
 
     if (editing) {
       setDescription(editing.description);
-      setAmountStr(formatNumberIT(editing.amount, 2, 0));
+      setAmountStr(formatDecimalInput(editing.amount));
       setCurrency(editing.currency);
-      setFixedRateStr(
-        editing.fixedExchangeRate ? String(editing.fixedExchangeRate).replace('.', ',') : ''
-      );
+      setFixedQuote(directQuote(editing.fixedExchangeRate));
       setCategoryKey(editing.category);
       setPaidBy(editing.paidBy);
       setSplitMode(editing.splitMode);
@@ -124,8 +121,8 @@ export function RecurringTab({
       const ex: Record<string, string> = {};
       const pc: Record<string, string> = {};
       editing.splits.forEach((s) => {
-        if (typeof s.amount === 'number') ex[s.userId] = formatNumberIT(s.amount, 2, 0);
-        if (typeof s.percentage === 'number') pc[s.userId] = formatNumberIT(s.percentage, 2, 0);
+        if (typeof s.amount === 'number') ex[s.userId] = formatDecimalInput(s.amount);
+        if (typeof s.percentage === 'number') pc[s.userId] = formatDecimalInput(s.percentage, 4);
       });
       setExactInputs(ex);
       setPctInputs(pc);
@@ -137,16 +134,15 @@ export function RecurringTab({
       setDescription('');
       setAmountStr('');
       setCurrency(baseCurrency);
-      setFixedRateStr('');
-      setCategoryKey('casa');
+      setFixedQuote(directQuote(null));
+      setCategoryKey(categories.find((c) => c.key === 'casa')?.key ?? categories[0]?.key ?? '');
       setPaidBy(
         defaultIds.includes(currentUserId) ? currentUserId : (defaultIds[0] ?? currentUserId)
       );
       setSplitMode('equal');
       setSelectedIds(defaultIds);
       setExactInputs({});
-      const equalPct =
-        defaultIds.length > 0 ? formatNumberIT(100 / defaultIds.length, 2, 0) : '100';
+      const equalPct = defaultIds.length > 0 ? formatDecimalInput(100 / defaultIds.length) : '100';
       const pc: Record<string, string> = {};
       defaultIds.forEach((id) => {
         pc[id] = equalPct;
@@ -157,7 +153,7 @@ export function RecurringTab({
       setEndDate('');
       setNote('');
     }
-  }, [modalOpen, editing, activeMembers, baseCurrency, currentUserId]);
+  }, [modalOpen, editing, activeMembers, baseCurrency, currentUserId, categories, groupId]);
 
   const parsedAmount = useMemo(() => {
     const v = parseDecimalInput(amountStr);
@@ -209,10 +205,12 @@ export function RecurringTab({
     }
 
     let fixedRate: number | null = null;
-    if (currency !== baseCurrency && fixedRateStr.trim()) {
-      const parsed = parseDecimalInput(fixedRateStr);
+    if (currency !== baseCurrency && fixedQuote.text.trim()) {
+      const parsed = canonicalRate(fixedQuote);
       if (parsed === null || parsed <= 0) {
-        setFormError('Inserisci un cambio fisso valido oppure lascia vuoto per il cambio automatico.');
+        setFormError(
+          'Inserisci un cambio fisso valido oppure lascia vuoto per il cambio automatico.'
+        );
         return;
       }
       fixedRate = parsed;
@@ -223,7 +221,10 @@ export function RecurringTab({
       return;
     }
 
-    const cat = categories.find((c) => c.key === categoryKey);
+    if (!selectedCategory) {
+      setFormError('Questa categoria non è più disponibile. Scegline un’altra.');
+      return;
+    }
     const input: RecurringExpenseInput = {
       id: editing?.id,
       groupId,
@@ -232,7 +233,7 @@ export function RecurringTab({
       currency,
       fixedExchangeRate: fixedRate,
       category: categoryKey,
-      categoryLabel: cat?.name ?? editing?.categoryLabel ?? 'Altro',
+      categoryLabel: selectedCategory.name,
       paidBy,
       splitMode,
       splits: splitCalc.splits.map((s) => ({
@@ -328,7 +329,7 @@ export function RecurringTab({
       ) : (
         <div className="card">
           {recurringExpenses.map((rec) => {
-            const cat = resolveCategoryDisplay(rec.category, rec.categoryLabel, customCategories);
+            const cat = resolveCategoryDisplay(rec.category, rec.categoryLabel, catalog);
             const isBusy = busyId === rec.id;
 
             return (
@@ -349,7 +350,9 @@ export function RecurringTab({
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <CategoryIcon icon={cat.icon} color={cat.color} boxed />
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}
+                      >
                         <span style={{ fontSize: 15, fontWeight: 650 }}>{rec.description}</span>
                         <span className={`badge ${rec.active ? 'badge-accent' : ''}`}>
                           {FREQUENCY_LABELS[rec.frequency]}
@@ -357,6 +360,8 @@ export function RecurringTab({
                         {!rec.active && <span className="badge badge-warning">In pausa</span>}
                       </div>
                       <div className="tx-sub">
+                        <span>{cat.name}</span>
+                        <span>·</span>
                         <span>Paga {nameOf(rec.paidBy)}</span>
                         <span>·</span>
                         <span>{SPLIT_MODE_LABELS[rec.splitMode]}</span>
@@ -382,7 +387,14 @@ export function RecurringTab({
                 </div>
 
                 {confirmDeleteId === rec.id ? (
-                  <div className="alert alert-error" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div
+                    className="alert alert-error"
+                    style={{
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <span>
                       Rimuovere questa ricorrenza? (Le spese già registrate resteranno nel gruppo.)
                     </span>
@@ -410,7 +422,15 @@ export function RecurringTab({
                     </div>
                   </div>
                 ) : !isClosed ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingLeft: 50 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexWrap: 'wrap',
+                      paddingLeft: 50,
+                    }}
+                  >
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -425,9 +445,7 @@ export function RecurringTab({
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={isBusy}
-                      onClick={() =>
-                        handleAction(rec.id, () => onToggleActive(rec, !rec.active))
-                      }
+                      onClick={() => handleAction(rec.id, () => onToggleActive(rec, !rec.active))}
                     >
                       {rec.active ? <Pause size={13} /> : <Play size={13} />}
                       {rec.active ? 'Pausa' : 'Riattiva'}
@@ -517,14 +535,19 @@ export function RecurringTab({
                 inputMode="decimal"
                 className="input tabular"
                 placeholder="0,00"
+                aria-label="Importo della ricorrenza"
                 value={amountStr}
                 onChange={(e) => setAmountStr(e.target.value)}
                 required
               />
               <select
                 className="select"
+                aria-label="Valuta della ricorrenza"
                 value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
+                onChange={(e) => {
+                  setCurrency(e.target.value);
+                  setFixedQuote(directQuote(null));
+                }}
               >
                 {CURRENCIES.map((c) => (
                   <option key={c.code} value={c.code}>
@@ -536,20 +559,19 @@ export function RecurringTab({
           </div>
 
           {currency !== baseCurrency && (
-            <label className="field">
-              <span className="field-label">
-                <span>Cambio fisso verso {baseCurrency}</span>
-                <span className="field-hint">Opzionale</span>
-              </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                className="input input-sm tabular"
-                placeholder={`Vuoto = cambio automatico BCE del giorno di scadenza`}
-                value={fixedRateStr}
-                onChange={(e) => setFixedRateStr(e.target.value)}
+            <div className="field fx-box">
+              <span className="field-label">Cambio fisso · opzionale</span>
+              <RateInput
+                key={currency}
+                from={currency}
+                to={baseCurrency}
+                quote={fixedQuote}
+                onChange={setFixedQuote}
               />
-            </label>
+              <span className="field-hint">
+                Lascia vuoto per usare il cambio automatico del giorno di scadenza.
+              </span>
+            </div>
           )}
 
           <div className="form-row">
@@ -572,12 +594,15 @@ export function RecurringTab({
               <span className="field-label">Categoria</span>
               <select
                 className="select"
-                value={categoryKey}
+                aria-label="Categoria"
+                value={selectedCategory?.key ?? ''}
                 onChange={(e) => setCategoryKey(e.target.value)}
               >
+                {!selectedCategory && <option value="">Scegli una categoria</option>}
                 {categories.map((c) => (
                   <option key={c.key} value={c.key}>
                     {c.name}
+                    {c.hidden ? ' (nascosta)' : ''}
                   </option>
                 ))}
               </select>
@@ -615,11 +640,7 @@ export function RecurringTab({
 
           <label className="field">
             <span className="field-label">Pagato da</span>
-            <select
-              className="select"
-              value={paidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-            >
+            <select className="select" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
               {activeMembers.map((m) => (
                 <option key={m.userId} value={m.userId}>
                   {m.displayName}

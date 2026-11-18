@@ -6,14 +6,14 @@ import {
   roundCurrency,
 } from '../lib/accounting';
 import {
-  buildCategoryOptions,
+  entryCategories,
   CUSTOM_CATEGORY_COLORS,
   CUSTOM_CATEGORY_ICONS,
 } from '../lib/categories';
 import {
   CURRENCIES,
-  fetchExchangeRate,
   formatMoney,
+  formatDecimalInput,
   formatNumberIT,
   formatRateValue,
   getCurrencyInfo,
@@ -25,8 +25,10 @@ import {
   FREQUENCY_OPTIONS,
 } from '../lib/recurring';
 import { translateErrorIT } from '../lib/supabase';
+import { useExchangeRate } from '../lib/useExchangeRate';
 import type {
-  CustomCategory,
+  CategoryOption,
+  CategoryStyle,
   Expense,
   ExpenseInput,
   GroupMember,
@@ -36,6 +38,7 @@ import type {
 } from '../types';
 import { Avatar, CategoryIcon } from './Icon';
 import { Modal } from './Modal';
+import { RateInput } from './RateInput';
 
 interface ExpenseFormModalProps {
   open: boolean;
@@ -44,18 +47,14 @@ interface ExpenseFormModalProps {
   baseCurrency: string;
   members: GroupMember[];
   currentUserId: string;
-  customCategories: CustomCategory[];
+  categories: CategoryOption[];
   editingExpense: Expense | null;
   onSaveExpense: (input: ExpenseInput, before?: Expense) => Promise<void>;
   onCreateRecurringWithOptionalFirst: (params: {
     recurring: RecurringExpenseInput;
     firstExpense?: ExpenseInput;
   }) => Promise<void>;
-  onAddCustomCategory: (params: {
-    name: string;
-    icon: string;
-    color: string;
-  }) => Promise<CustomCategory>;
+  onAddCustomCategory: (params: CategoryStyle) => Promise<string>;
   onToast: (msg: string, isError?: boolean) => void;
 }
 
@@ -66,17 +65,14 @@ export function ExpenseFormModal({
   baseCurrency,
   members,
   currentUserId,
-  customCategories,
+  categories: catalog,
   editingExpense,
   onSaveExpense,
   onCreateRecurringWithOptionalFirst,
   onAddCustomCategory,
   onToast,
 }: ExpenseFormModalProps) {
-  const activeMembers = useMemo(
-    () => members.filter((m) => m.leftAt === null),
-    [members]
-  );
+  const activeMembers = useMemo(() => members.filter((m) => m.leftAt === null), [members]);
 
   // Include eventuali ex membri coinvolti in una spesa storica in modifica
   const selectableMembers = useMemo(() => {
@@ -87,11 +83,6 @@ export function ExpenseFormModal({
     ]);
     return members.filter((m) => m.leftAt === null || involvedIds.has(m.userId));
   }, [activeMembers, editingExpense, members]);
-
-  const categories = useMemo(
-    () => buildCategoryOptions(customCategories),
-    [customCategories]
-  );
 
   const [description, setDescription] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -105,12 +96,15 @@ export function ExpenseFormModal({
   const [pctInputs, setPctInputs] = useState<Record<string, string>>({});
   const [note, setNote] = useState('');
 
-  // Gestione cambio valuta (salvato senza aggiornamenti retroattivi)
-  const [rateStr, setRateStr] = useState('1');
-  const [rateDate, setRateDate] = useState(todayISO());
-  const [rateIsManual, setRateIsManual] = useState(false);
-  const [rateSource, setRateSource] = useState<'ecb' | 'fallback' | 'saved'>('ecb');
-  const [fetchingRate, setFetchingRate] = useState(false);
+  const fx = useExchangeRate(open, currency, baseCurrency, expenseDate);
+  const {
+    reset: resetRate,
+    rate: parsedRate,
+    rateDate,
+    manual: rateIsManual,
+    source: rateSource,
+    loading: fetchingRate,
+  } = fx;
 
   // Opzione ricorrenza (solo in creazione)
   const [isRecurring, setIsRecurring] = useState(false);
@@ -127,9 +121,13 @@ export function ExpenseFormModal({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Impedisce il ricalcolo automatico del cambio all'apertura di una spesa esistente
-  const preserveSavedRateRef = useRef(false);
-  // Evita che aggiornamenti Realtime o l'aggiunta di una categoria resettino i campi già compilati
+  const categories = useMemo(
+    () => entryCategories(catalog, editingExpense),
+    [catalog, editingExpense]
+  );
+  const selectedCategory = categories.find((c) => c.key === categoryKey);
+
+  // La sincronizzazione non deve resettare i campi già compilati.
   const initializedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -146,9 +144,9 @@ export function ExpenseFormModal({
     setNewCatName('');
 
     if (editingExpense) {
-      preserveSavedRateRef.current = true;
+      resetRate(editingExpense);
       setDescription(editingExpense.description);
-      setAmountStr(formatNumberIT(editingExpense.amount, 2, 0));
+      setAmountStr(formatDecimalInput(editingExpense.amount));
       setCurrency(editingExpense.currency);
       setExpenseDate(editingExpense.expenseDate);
       setCategoryKey(editingExpense.category);
@@ -159,106 +157,56 @@ export function ExpenseFormModal({
       const exacts: Record<string, string> = {};
       const pcts: Record<string, string> = {};
       for (const s of editingExpense.splits) {
-        exacts[s.userId] = formatNumberIT(s.amount, 2, 0);
+        exacts[s.userId] = formatDecimalInput(s.amount);
         if (s.percentage !== null) {
-          pcts[s.userId] = formatNumberIT(s.percentage, 2, 0);
+          pcts[s.userId] = formatDecimalInput(s.percentage, 4);
         }
       }
       setExactInputs(exacts);
       setPctInputs(pcts);
       setNote(editingExpense.note);
 
-      setRateStr(String(editingExpense.exchangeRate).replace('.', ','));
-      setRateDate(editingExpense.rateDate);
-      setRateIsManual(editingExpense.rateIsManual);
-      setRateSource('saved');
       setIsRecurring(false);
       setEndDate('');
     } else {
-      preserveSavedRateRef.current = false;
+      resetRate();
       const today = todayISO();
       const defaultIds = activeMembers.map((m) => m.userId);
       setDescription('');
       setAmountStr('');
       setCurrency(baseCurrency);
       setExpenseDate(today);
-      setCategoryKey('spesa');
+      setCategoryKey(categories[0]?.key ?? '');
       setPaidBy(
         defaultIds.includes(currentUserId) ? currentUserId : (defaultIds[0] ?? currentUserId)
       );
       setSplitMode('equal');
       setSelectedIds(defaultIds);
       setExactInputs({});
-      const equalPct =
-        defaultIds.length > 0 ? formatNumberIT(100 / defaultIds.length, 2, 0) : '100';
+      const equalPct = defaultIds.length > 0 ? formatDecimalInput(100 / defaultIds.length) : '100';
       const initialPcts: Record<string, string> = {};
       defaultIds.forEach((id) => {
         initialPcts[id] = equalPct;
       });
       setPctInputs(initialPcts);
       setNote('');
-      setRateStr('1');
-      setRateDate(today);
-      setRateIsManual(false);
-      setRateSource('ecb');
       setIsRecurring(false);
       setFrequency('monthly');
       setEndDate('');
     }
-  }, [open, editingExpense, baseCurrency, activeMembers, currentUserId]);
-
-  const loadAutoRate = async (fromCur: string, dateForRate: string) => {
-    if (fromCur === baseCurrency) {
-      setRateStr('1');
-      setRateDate(dateForRate);
-      setRateIsManual(false);
-      setRateSource('ecb');
-      return;
-    }
-    setFetchingRate(true);
-    try {
-      const res = await fetchExchangeRate(fromCur, baseCurrency, dateForRate);
-      setRateStr(String(res.rate).replace('.', ','));
-      setRateDate(res.effectiveDate);
-      setRateIsManual(false);
-      setRateSource(res.source);
-    } finally {
-      setFetchingRate(false);
-    }
-  };
-
-  // Cambio automatico alla data della spesa SOLO per nuove spese (o cambio valuta esplicito)
-  useEffect(() => {
-    if (!open) return;
-    if (currency === baseCurrency) {
-      setRateStr('1');
-      setRateDate(expenseDate);
-      setRateIsManual(false);
-      return;
-    }
-    if (preserveSavedRateRef.current || rateIsManual) return;
-
-    let cancelled = false;
-    setFetchingRate(true);
-    fetchExchangeRate(currency, baseCurrency, expenseDate)
-      .then((res) => {
-        if (cancelled) return;
-        setRateStr(String(res.rate).replace('.', ','));
-        setRateDate(res.effectiveDate);
-        setRateSource(res.source);
-      })
-      .finally(() => {
-        if (!cancelled) setFetchingRate(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, currency, expenseDate, baseCurrency, rateIsManual]);
+  }, [
+    open,
+    editingExpense,
+    baseCurrency,
+    activeMembers,
+    currentUserId,
+    categories,
+    groupId,
+    resetRate,
+  ]);
 
   const handleCurrencyChange = (nextCur: string) => {
-    preserveSavedRateRef.current = false;
-    setRateIsManual(false);
+    resetRate();
     setCurrency(nextCur);
   };
 
@@ -267,16 +215,16 @@ export function ExpenseFormModal({
     return v !== null && v > 0 ? roundCurrency(v, currency) : 0;
   }, [amountStr, currency]);
 
-  const parsedRate = useMemo(() => {
-    if (currency === baseCurrency) return 1;
-    const v = parseDecimalInput(rateStr);
-    return v !== null && v > 0 ? v : 0;
-  }, [currency, baseCurrency, rateStr]);
-
-  const computedBaseAmount = useMemo(() => {
-    if (parsedAmount <= 0 || parsedRate <= 0) return 0;
-    return convertToBaseAmount(parsedAmount, currency, parsedRate, baseCurrency);
-  }, [parsedAmount, currency, parsedRate, baseCurrency]);
+  const frozen =
+    editingExpense &&
+    rateSource === 'saved' &&
+    currency === editingExpense.currency &&
+    parsedAmount === editingExpense.amount &&
+    parsedRate === editingExpense.exchangeRate
+      ? editingExpense
+      : null;
+  const computedBaseAmount =
+    frozen?.baseAmount ?? convertToBaseAmount(parsedAmount, currency, parsedRate, baseCurrency);
 
   const exactNumbers = useMemo(() => {
     const out: Record<string, number> = {};
@@ -296,29 +244,42 @@ export function ExpenseFormModal({
     return out;
   }, [selectedIds, pctInputs]);
 
-  const splitCalc = useMemo(
-    () =>
-      computeExpenseSplits({
-        totalAmount: parsedAmount,
-        currency,
-        totalBaseAmount: computedBaseAmount,
-        baseCurrency,
-        splitMode,
-        participantIds: selectedIds,
-        exactAmounts: exactNumbers,
-        percentages: pctNumbers,
-      }),
-    [
-      parsedAmount,
+  const splitCalc = useMemo(() => {
+    // Non riassegnare neppure un centesimo tra persone se si modifica solo nome, nota o verso di lettura.
+    if (
+      frozen &&
+      splitMode === frozen.splitMode &&
+      selectedIds.length === frozen.splits.length &&
+      frozen.splits.every(
+        (s) =>
+          selectedIds.includes(s.userId) &&
+          (splitMode !== 'exact' || exactNumbers[s.userId] === s.amount) &&
+          (splitMode !== 'percentage' || pctNumbers[s.userId] === s.percentage)
+      )
+    ) {
+      return { valid: true, splits: frozen.splits, remaining: 0, error: undefined };
+    }
+    return computeExpenseSplits({
+      totalAmount: parsedAmount,
       currency,
-      computedBaseAmount,
+      totalBaseAmount: computedBaseAmount,
       baseCurrency,
       splitMode,
-      selectedIds,
-      exactNumbers,
-      pctNumbers,
-    ]
-  );
+      participantIds: selectedIds,
+      exactAmounts: exactNumbers,
+      percentages: pctNumbers,
+    });
+  }, [
+    frozen,
+    parsedAmount,
+    currency,
+    computedBaseAmount,
+    baseCurrency,
+    splitMode,
+    selectedIds,
+    exactNumbers,
+    pctNumbers,
+  ]);
 
   const toggleParticipant = (userId: string) => {
     setSelectedIds((prev) =>
@@ -340,7 +301,7 @@ export function ExpenseFormModal({
         });
         const nextExacts: Record<string, string> = { ...exactInputs };
         for (const s of eq.splits) {
-          nextExacts[s.userId] = formatNumberIT(s.amount, 2, 0);
+          nextExacts[s.userId] = formatDecimalInput(s.amount);
         }
         setExactInputs(nextExacts);
       }
@@ -359,15 +320,15 @@ export function ExpenseFormModal({
 
   const distributeEqualPercentages = (ids: string[]) => {
     if (ids.length === 0) return;
-    const base = Math.floor((10000 / ids.length)) / 100;
+    const base = Math.floor(10000 / ids.length) / 100;
     const next: Record<string, string> = {};
     let assigned = 0;
     ids.forEach((id, idx) => {
       if (idx === ids.length - 1) {
         const last = Number((100 - assigned).toFixed(2));
-        next[id] = formatNumberIT(last, 2, 0);
+        next[id] = formatDecimalInput(last);
       } else {
-        next[id] = formatNumberIT(base, 2, 0);
+        next[id] = formatDecimalInput(base);
         assigned += base;
       }
     });
@@ -379,7 +340,7 @@ export function ExpenseFormModal({
     const updated = roundCurrency(Math.max(0, current + splitCalc.remaining), currency);
     setExactInputs((prev) => ({
       ...prev,
-      [targetId]: formatNumberIT(updated, 2, 0),
+      [targetId]: formatDecimalInput(updated),
     }));
   };
 
@@ -392,10 +353,10 @@ export function ExpenseFormModal({
         icon: newCatIcon,
         color: newCatColor,
       });
-      setCategoryKey(`custom:${created.id}`);
+      setCategoryKey(created);
       setNewCatName('');
       setShowNewCat(false);
-      onToast(`Categoria "${created.name}" aggiunta`);
+      onToast(`Categoria "${newCatName.trim()}" aggiunta`);
     } catch (err) {
       onToast(translateErrorIT(err), true);
     } finally {
@@ -429,12 +390,11 @@ export function ExpenseFormModal({
       return;
     }
 
-    const chosenCat = categories.find((c) => c.key === categoryKey);
-    const categoryLabel =
-      chosenCat?.name ??
-      (editingExpense && editingExpense.category === categoryKey
-        ? editingExpense.categoryLabel
-        : 'Altro');
+    if (!selectedCategory) {
+      setFormError('Questa categoria non è più disponibile. Scegline un’altra.');
+      return;
+    }
+    const categoryLabel = selectedCategory.name;
 
     const expensePayload: ExpenseInput = {
       id: editingExpense?.id,
@@ -470,8 +430,7 @@ export function ExpenseFormModal({
           description: cleanDesc,
           amount: parsedAmount,
           currency,
-          fixedExchangeRate:
-            currency !== baseCurrency && rateIsManual ? parsedRate : null,
+          fixedExchangeRate: currency !== baseCurrency && rateIsManual ? parsedRate : null,
           category: categoryKey,
           categoryLabel,
           paidBy,
@@ -510,7 +469,7 @@ export function ExpenseFormModal({
   const showDateRateSyncButton =
     Boolean(editingExpense) &&
     currency !== baseCurrency &&
-    preserveSavedRateRef.current &&
+    rateSource === 'saved' &&
     expenseDate !== editingExpense?.expenseDate;
 
   return (
@@ -566,6 +525,7 @@ export function ExpenseFormModal({
               inputMode="decimal"
               className="input tabular"
               placeholder="0,00"
+              aria-label="Importo della spesa"
               value={amountStr}
               onChange={(e) => setAmountStr(e.target.value)}
               required
@@ -598,8 +558,8 @@ export function ExpenseFormModal({
               }}
             >
               <span style={{ fontSize: 13, fontWeight: 600 }}>
-                Cambio verso {baseCurrency}{' '}
-                {rateIsManual ? (
+                Cambio valuta{' '}
+                {fetchingRate ? null : rateIsManual ? (
                   <span className="badge badge-warning" style={{ marginLeft: 4 }}>
                     Manuale
                   </span>
@@ -622,10 +582,7 @@ export function ExpenseFormModal({
                 type="button"
                 className="link-btn"
                 style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                onClick={() => {
-                  preserveSavedRateRef.current = false;
-                  loadAutoRate(currency, expenseDate);
-                }}
+                onClick={() => resetRate()}
                 disabled={fetchingRate}
               >
                 <RefreshCw size={12} />
@@ -637,25 +594,13 @@ export function ExpenseFormModal({
               </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span className="tabular" style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>
-                1 {currency} =
-              </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                className="input input-sm tabular"
-                style={{ width: 126 }}
-                value={rateStr}
-                onChange={(e) => {
-                  preserveSavedRateRef.current = false;
-                  setRateIsManual(true);
-                  setRateDate(expenseDate);
-                  setRateStr(e.target.value);
-                }}
-                aria-label="Tasso di cambio"
-              />
-              <span style={{ fontSize: 13.5, color: 'var(--text-secondary)' }}>{baseCurrency}</span>
+            <RateInput
+              key={currency}
+              from={currency}
+              to={baseCurrency}
+              quote={fx.quote}
+              onChange={fx.write}
+            >
               {parsedAmount > 0 && parsedRate > 0 && (
                 <span
                   className="tabular"
@@ -664,7 +609,7 @@ export function ExpenseFormModal({
                   = {formatMoney(computedBaseAmount, baseCurrency)}
                 </span>
               )}
-            </div>
+            </RateInput>
 
             <span className="field-hint">
               Il tasso viene salvato su questa spesa e non subirà variazioni retroattive.
@@ -701,13 +646,15 @@ export function ExpenseFormModal({
             </span>
             <select
               className="select"
-              value={categoryKey}
+              aria-label="Categoria"
+              value={selectedCategory?.key ?? ''}
               onChange={(e) => setCategoryKey(e.target.value)}
             >
+              {!selectedCategory && <option value="">Scegli una categoria</option>}
               {categories.map((c) => (
                 <option key={c.key} value={c.key}>
                   {c.name}
-                  {c.isCustom ? ' ★' : ''}
+                  {c.hidden ? ' (nascosta)' : ''}
                 </option>
               ))}
             </select>
@@ -769,11 +716,7 @@ export function ExpenseFormModal({
 
         <label className="field">
           <span className="field-label">Pagato da</span>
-          <select
-            className="select"
-            value={paidBy}
-            onChange={(e) => setPaidBy(e.target.value)}
-          >
+          <select className="select" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
             {selectableMembers.map((m) => (
               <option key={m.userId} value={m.userId}>
                 {m.displayName}
@@ -934,9 +877,7 @@ export function ExpenseFormModal({
                 display: 'flex',
                 justifyContent: 'space-between',
                 color:
-                  Math.abs(splitCalc.remaining) < 0.005
-                    ? 'var(--positive)'
-                    : 'var(--negative)',
+                  Math.abs(splitCalc.remaining) < 0.005 ? 'var(--positive)' : 'var(--negative)',
               }}
             >
               <span>
@@ -962,9 +903,7 @@ export function ExpenseFormModal({
               <span
                 style={{
                   color:
-                    Math.abs(splitCalc.remaining) <= 0.02
-                      ? 'var(--positive)'
-                      : 'var(--negative)',
+                    Math.abs(splitCalc.remaining) <= 0.02 ? 'var(--positive)' : 'var(--negative)',
                 }}
               >
                 {Math.abs(splitCalc.remaining) <= 0.02
@@ -987,7 +926,10 @@ export function ExpenseFormModal({
 
         {/* Opzione spesa ricorrente (solo in creazione) */}
         {!editingExpense && (
-          <div className="fx-box" style={{ background: isRecurring ? 'var(--accent-soft)' : undefined }}>
+          <div
+            className="fx-box"
+            style={{ background: isRecurring ? 'var(--accent-soft)' : undefined }}
+          >
             <button
               type="button"
               style={{
@@ -999,7 +941,15 @@ export function ExpenseFormModal({
               }}
               onClick={() => setIsRecurring((v) => !v)}
             >
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 550 }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 13.5,
+                  fontWeight: 550,
+                }}
+              >
                 <Repeat size={15} style={{ color: 'var(--accent)' }} />
                 Ripeti automaticamente (affitto, bollette, abbonamenti)
               </span>
@@ -1058,7 +1008,7 @@ export function ExpenseFormModal({
           />
         </label>
 
-        {editingExpense && currency !== baseCurrency && !rateIsManual && (
+        {editingExpense && currency !== baseCurrency && rateSource === 'saved' && !rateIsManual && (
           <p className="field-hint" style={{ marginTop: -6 }}>
             Cambio salvato: 1 {currency} = {formatRateValue(parsedRate)} {baseCurrency}
           </p>

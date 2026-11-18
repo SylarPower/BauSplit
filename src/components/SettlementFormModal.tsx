@@ -3,13 +3,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { convertToBaseAmount, roundCurrency } from '../lib/accounting';
 import {
   CURRENCIES,
-  fetchExchangeRate,
   formatMoney,
-  formatNumberIT,
+  formatDecimalInput,
   parseDecimalInput,
 } from '../lib/currencies';
 import { formatFullDateIT, todayISO } from '../lib/dates';
 import { translateErrorIT } from '../lib/supabase';
+import { useExchangeRate } from '../lib/useExchangeRate';
 import type {
   GroupMember,
   MemberBalance,
@@ -18,6 +18,7 @@ import type {
   SimplifiedTransfer,
 } from '../types';
 import { Modal } from './Modal';
+import { RateInput } from './RateInput';
 
 interface SettlementFormModalProps {
   open: boolean;
@@ -67,14 +68,18 @@ export function SettlementFormModal({
   const [settlementDate, setSettlementDate] = useState(todayISO());
   const [note, setNote] = useState('');
 
-  const [rateStr, setRateStr] = useState('1');
-  const [rateDate, setRateDate] = useState(todayISO());
-  const [rateIsManual, setRateIsManual] = useState(false);
-  const [fetchingRate, setFetchingRate] = useState(false);
+  const fx = useExchangeRate(open, currency, baseCurrency, settlementDate);
+  const {
+    reset: resetRate,
+    rate: parsedRate,
+    rateDate,
+    manual: rateIsManual,
+    loading: fetchingRate,
+  } = fx;
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const preserveSavedRateRef = useRef(false);
+  // La sincronizzazione non deve resettare i campi già compilati.
   const initializedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -93,30 +98,22 @@ export function SettlementFormModal({
     setError(null);
     const today = todayISO();
 
+    resetRate(editingSettlement);
     if (editingSettlement) {
-      preserveSavedRateRef.current = true;
       setFromUser(editingSettlement.fromUser);
       setToUser(editingSettlement.toUser);
-      setAmountStr(formatNumberIT(editingSettlement.amount, 2, 0));
+      setAmountStr(formatDecimalInput(editingSettlement.amount));
       setCurrency(editingSettlement.currency);
       setSettlementDate(editingSettlement.settlementDate);
       setNote(editingSettlement.note);
-      setRateStr(String(editingSettlement.exchangeRate).replace('.', ','));
-      setRateDate(editingSettlement.rateDate);
-      setRateIsManual(editingSettlement.rateIsManual);
     } else if (prefillTransfer) {
-      preserveSavedRateRef.current = false;
       setFromUser(prefillTransfer.fromUser);
       setToUser(prefillTransfer.toUser);
-      setAmountStr(formatNumberIT(prefillTransfer.amount, 2, 0));
+      setAmountStr(formatDecimalInput(prefillTransfer.amount));
       setCurrency(baseCurrency);
       setSettlementDate(today);
       setNote('');
-      setRateStr('1');
-      setRateDate(today);
-      setRateIsManual(false);
     } else {
-      preserveSavedRateRef.current = false;
       const first =
         selectableMembers.find((m) => m.userId === currentUserId)?.userId ??
         selectableMembers[0]?.userId ??
@@ -128,53 +125,31 @@ export function SettlementFormModal({
       setCurrency(baseCurrency);
       setSettlementDate(today);
       setNote('');
-      setRateStr('1');
-      setRateDate(today);
-      setRateIsManual(false);
     }
-  }, [open, editingSettlement, prefillTransfer, baseCurrency, selectableMembers, currentUserId]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (currency === baseCurrency) {
-      setRateStr('1');
-      setRateDate(settlementDate);
-      setRateIsManual(false);
-      return;
-    }
-    if (preserveSavedRateRef.current || rateIsManual) return;
-
-    let cancelled = false;
-    setFetchingRate(true);
-    fetchExchangeRate(currency, baseCurrency, settlementDate)
-      .then((res) => {
-        if (cancelled) return;
-        setRateStr(String(res.rate).replace('.', ','));
-        setRateDate(res.effectiveDate);
-      })
-      .finally(() => {
-        if (!cancelled) setFetchingRate(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, currency, settlementDate, baseCurrency, rateIsManual]);
+  }, [
+    open,
+    editingSettlement,
+    prefillTransfer,
+    baseCurrency,
+    selectableMembers,
+    currentUserId,
+    groupId,
+    resetRate,
+  ]);
 
   const parsedAmount = useMemo(() => {
     const v = parseDecimalInput(amountStr);
     return v !== null && v > 0 ? roundCurrency(v, currency) : 0;
   }, [amountStr, currency]);
 
-  const parsedRate = useMemo(() => {
-    if (currency === baseCurrency) return 1;
-    const v = parseDecimalInput(rateStr);
-    return v !== null && v > 0 ? v : 0;
-  }, [currency, baseCurrency, rateStr]);
-
-  const baseAmount = useMemo(() => {
-    if (parsedAmount <= 0 || parsedRate <= 0) return 0;
-    return convertToBaseAmount(parsedAmount, currency, parsedRate, baseCurrency);
-  }, [parsedAmount, currency, parsedRate, baseCurrency]);
+  const baseAmount =
+    editingSettlement &&
+    fx.source === 'saved' &&
+    currency === editingSettlement.currency &&
+    parsedAmount === editingSettlement.amount &&
+    parsedRate === editingSettlement.exchangeRate
+      ? editingSettlement.baseAmount
+      : convertToBaseAmount(parsedAmount, currency, parsedRate, baseCurrency);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -236,11 +211,7 @@ export function SettlementFormModal({
             className="btn btn-primary"
             disabled={saving || fetchingRate || selectableMembers.length < 2}
           >
-            {saving
-              ? 'Salvataggio…'
-              : editingSettlement
-                ? 'Salva modifiche'
-                : 'Registra rimborso'}
+            {saving ? 'Salvataggio…' : editingSettlement ? 'Salva modifiche' : 'Registra rimborso'}
           </button>
         </>
       }
@@ -324,6 +295,7 @@ export function SettlementFormModal({
                 inputMode="decimal"
                 className="input tabular"
                 placeholder="0,00"
+                aria-label="Importo del rimborso"
                 value={amountStr}
                 onChange={(e) => setAmountStr(e.target.value)}
                 autoFocus
@@ -331,10 +303,10 @@ export function SettlementFormModal({
               />
               <select
                 className="select"
+                aria-label="Valuta del rimborso"
                 value={currency}
                 onChange={(e) => {
-                  preserveSavedRateRef.current = false;
-                  setRateIsManual(false);
+                  resetRate();
                   setCurrency(e.target.value);
                 }}
               >
@@ -349,43 +321,35 @@ export function SettlementFormModal({
 
           {currency !== baseCurrency && (
             <div className="fx-box">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
                 <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  Cambio verso {baseCurrency} ({formatFullDateIT(rateDate)})
+                  Cambio valuta ({formatFullDateIT(rateDate)})
                 </span>
                 <button
                   type="button"
                   className="link-btn"
                   style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                  onClick={() => {
-                    preserveSavedRateRef.current = false;
-                    setRateIsManual(false);
-                  }}
+                  onClick={() => resetRate()}
+                  disabled={fetchingRate}
                 >
-                  <RefreshCw size={12} /> Automatico
+                  <RefreshCw size={12} /> {fetchingRate ? 'Aggiorno…' : 'Cambio automatico'}
                 </button>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13.5 }}>1 {currency} =</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  className="input input-sm tabular"
-                  style={{ width: 120 }}
-                  value={rateStr}
-                  onChange={(e) => {
-                    preserveSavedRateRef.current = false;
-                    setRateIsManual(true);
-                    setRateStr(e.target.value);
-                  }}
-                />
-                <span style={{ fontSize: 13.5 }}>{baseCurrency}</span>
+              <RateInput
+                key={currency}
+                from={currency}
+                to={baseCurrency}
+                quote={fx.quote}
+                onChange={fx.write}
+              >
                 {parsedAmount > 0 && parsedRate > 0 && (
                   <span className="tabular" style={{ marginLeft: 'auto', fontWeight: 650 }}>
                     = {formatMoney(baseAmount, baseCurrency)}
                   </span>
                 )}
-              </div>
+              </RateInput>
             </div>
           )}
 
@@ -417,7 +381,8 @@ export function SettlementFormModal({
 
           <p className="field-hint">
             Il rimborso avviene fuori dall&apos;app e aggiorna subito i saldi del gruppo, senza
-            richiedere conferma al destinatario. Non viene sommato ai totali di spesa negli Insights.
+            richiedere conferma al destinatario. Non viene sommato ai totali di spesa negli
+            Insights.
           </p>
         </form>
       )}

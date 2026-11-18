@@ -28,7 +28,7 @@ import { processDueRecurringExpenses } from '../lib/repository';
 import { advanceRecurringDate } from '../lib/recurring';
 import { formatFullDateIT, todayISO } from '../lib/dates';
 import type {
-  CustomCategory,
+  CategoryPatch,
   DateRangePreset,
   Expense,
   ExpenseFilters,
@@ -82,7 +82,7 @@ export function GroupView({
   onGroupLeft,
   onToast,
 }: GroupViewProps) {
-  const { group, members, customCategories, expenses, settlements, recurringExpenses, activityLogs } =
+  const { group, members, categories, expenses, settlements, recurringExpenses, activityLogs } =
     data;
   const isClosed = group.closedAt !== null;
 
@@ -328,23 +328,10 @@ export function GroupView({
     onToast('Spesa ricorrente rimossa');
   };
 
-  const handleAddCategory = async (params: {
-    name: string;
-    icon: string;
-    color: string;
-  }): Promise<CustomCategory> => {
-    const created = await repo.addCustomCategory({
-      groupId: group.id,
-      actorId,
-      ...params,
-    });
+  const handleSaveCategory = async (key: string | null, patch: CategoryPatch) => {
+    const savedKey = await repo.saveCategory(group.id, key, patch);
     await onRefreshGroup();
-    return created;
-  };
-
-  const handleDeleteCategory = async (cat: CustomCategory) => {
-    await repo.deleteCustomCategory({ category: cat, actorId });
-    await onRefreshGroup();
+    return savedKey;
   };
 
   const handleUpdateGroup = async (name: string, description: string) => {
@@ -711,7 +698,7 @@ export function GroupView({
             baseCurrency={group.baseCurrency}
             currentUserId={currentUserId}
             members={members}
-            customCategories={customCategories}
+            categories={categories}
             expenses={expenses}
             settlements={settlements}
             activityLogs={activityLogs}
@@ -770,7 +757,7 @@ export function GroupView({
             expenses={expenses}
             settlements={settlements}
             members={members}
-            customCategories={customCategories}
+            categories={categories}
             onFilterByCategory={handleFilterFromInsights}
           />
         )}
@@ -782,7 +769,7 @@ export function GroupView({
             baseCurrency={group.baseCurrency}
             currentUserId={currentUserId}
             members={members}
-            customCategories={customCategories}
+            categories={categories}
             recurringExpenses={recurringExpenses}
             nameOf={nameOf}
             onSaveRecurring={handleSaveRecurring}
@@ -833,11 +820,11 @@ export function GroupView({
         baseCurrency={group.baseCurrency}
         members={members}
         currentUserId={currentUserId}
-        customCategories={customCategories}
+        categories={categories}
         editingExpense={editingExpense}
         onSaveExpense={handleSaveExpense}
         onCreateRecurringWithOptionalFirst={handleCreateRecurringWithFirst}
-        onAddCustomCategory={handleAddCategory}
+        onAddCustomCategory={style => handleSaveCategory(null, style)}
         onToast={onToast}
       />
 
@@ -885,15 +872,22 @@ export function GroupView({
         members={members}
         balances={balances}
         transfers={transfers}
-        customCategories={customCategories}
+        categories={categories}
         currentUserId={currentUserId}
         onUpdateGroup={handleUpdateGroup}
         onAddParticipant={async (name) => {
           await repo.addParticipant(group.id, name);
           await onRefreshGroup();
         }}
-        onAddCategory={handleAddCategory}
-        onDeleteCategory={handleDeleteCategory}
+        onSaveCategory={handleSaveCategory}
+        onMoveCategory={async (key, step) => {
+          await repo.moveCategory(group.id, key, step);
+          await onRefreshGroup();
+        }}
+        onDeleteCategory={async key => {
+          await repo.deleteCategory(group.id, key);
+          await onRefreshGroup();
+        }}
         onCloseGroup={handleCloseGroup}
         onReopenGroup={handleReopenGroup}
         onLeaveGroup={handleLeaveGroup}

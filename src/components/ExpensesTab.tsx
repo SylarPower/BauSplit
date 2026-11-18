@@ -13,7 +13,7 @@ import { useMemo, useState } from 'react';
 import { getUserExpenseImpact } from '../lib/accounting';
 import { SPLIT_MODE_LABELS, splitLogActorAndBody } from '../lib/audit';
 import {
-  buildCategoryOptions,
+  filterCategories,
   resolveCategoryDisplay,
 } from '../lib/categories';
 import {
@@ -34,7 +34,7 @@ import {
 import { translateErrorIT } from '../lib/supabase';
 import type {
   ActivityLog,
-  CustomCategory,
+  CategoryOption,
   DateRangePreset,
   Expense,
   ExpenseFilters,
@@ -63,7 +63,7 @@ interface ExpensesTabProps {
   baseCurrency: string;
   currentUserId: string;
   members: GroupMember[];
-  customCategories: CustomCategory[];
+  categories: CategoryOption[];
   expenses: Expense[];
   settlements: Settlement[];
   activityLogs: ActivityLog[];
@@ -87,7 +87,7 @@ export function ExpensesTab({
   baseCurrency,
   currentUserId,
   members,
-  customCategories,
+  categories,
   expenses,
   settlements,
   activityLogs,
@@ -113,8 +113,8 @@ export function ExpensesTab({
   const nameOf = (id: string) => nameMap.get(id) ?? 'Membro';
 
   const categoryOptions = useMemo(
-    () => buildCategoryOptions(customCategories),
-    [customCategories]
+    () => filterCategories(categories, expenses),
+    [categories, expenses]
   );
 
   const usedCurrencies = useMemo(() => {
@@ -595,7 +595,7 @@ export function ExpensesTab({
                   const cat = resolveCategoryDisplay(
                     exp.category,
                     exp.categoryLabel,
-                    customCategories
+                    categories
                   );
                   const impact = getUserExpenseImpact(exp, currentUserId, baseCurrency);
                   const payerLabel =

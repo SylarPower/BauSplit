@@ -5,7 +5,6 @@ import {
   LogOut,
   Plus,
   RefreshCw,
-  Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
@@ -13,29 +12,25 @@ import {
   getGroupTransferTargets,
 } from '../lib/accounting';
 import {
-  CUSTOM_CATEGORY_COLORS,
-  CUSTOM_CATEGORY_ICONS,
-} from '../lib/categories';
-import {
-  fetchExchangeRate,
   formatMoney,
   formatRateValue,
-  parseDecimalInput,
 } from '../lib/currencies';
 import { formatFullDateIT, todayISO } from '../lib/dates';
 import { translateErrorIT } from '../lib/supabase';
+import { useExchangeRate } from '../lib/useExchangeRate';
 import type {
-  CustomCategory,
   ExpenseGroup,
   GroupMember,
   GroupOverview,
   MemberBalance,
   SimplifiedTransfer,
 } from '../types';
-import { Avatar, CategoryIcon } from './Icon';
+import { Avatar } from './Icon';
+import { CategoryManager, type CategoryManagerProps } from './CategoryManager';
 import { Modal } from './Modal';
+import { RateInput } from './RateInput';
 
-interface GroupSettingsModalProps {
+interface GroupSettingsModalProps extends CategoryManagerProps {
   open: boolean;
   onClose: () => void;
   initialFocusClose?: boolean;
@@ -44,16 +39,9 @@ interface GroupSettingsModalProps {
   members: GroupMember[];
   balances: MemberBalance[];
   transfers: SimplifiedTransfer[];
-  customCategories: CustomCategory[];
   currentUserId: string;
   onUpdateGroup: (name: string, description: string) => Promise<void>;
   onAddParticipant: (name: string) => Promise<void>;
-  onAddCategory: (params: {
-    name: string;
-    icon: string;
-    color: string;
-  }) => Promise<CustomCategory>;
-  onDeleteCategory: (cat: CustomCategory) => Promise<void>;
   onCloseGroup: (params: {
     targetGroup: ExpenseGroup | null;
     exchangeRate: number;
@@ -62,7 +50,6 @@ interface GroupSettingsModalProps {
   }) => Promise<void>;
   onReopenGroup: () => Promise<void>;
   onLeaveGroup: () => Promise<void>;
-  onToast: (msg: string, isError?: boolean) => void;
 }
 
 export function GroupSettingsModal({
@@ -74,11 +61,12 @@ export function GroupSettingsModal({
   members,
   balances,
   transfers,
-  customCategories,
+  categories,
   currentUserId,
   onUpdateGroup,
   onAddParticipant,
-  onAddCategory,
+  onSaveCategory,
+  onMoveCategory,
   onDeleteCategory,
   onCloseGroup,
   onReopenGroup,
@@ -93,19 +81,10 @@ export function GroupSettingsModal({
 
   const [newMember, setNewMember] = useState('');
   const [addingMember, setAddingMember] = useState(false);
-  const [catName, setCatName] = useState('');
-  const [catIcon, setCatIcon] = useState('tag');
-  const [catColor, setCatColor] = useState(CUSTOM_CATEGORY_COLORS[0]);
-  const [addingCat, setAddingCat] = useState(false);
-
   // Chiusura gruppo e trasferimento saldo rimanente
   const [showClosePanel, setShowClosePanel] = useState(false);
   const [closeMode, setCloseMode] = useState<'transfer' | 'keep'>('transfer');
   const [targetGroupId, setTargetGroupId] = useState('');
-  const [fxStr, setFxStr] = useState('1');
-  const [fxDate, setFxDate] = useState(todayISO());
-  const [fxManual, setFxManual] = useState(false);
-  const [loadingFx, setLoadingFx] = useState(false);
   const [closingBusy, setClosingBusy] = useState(false);
 
   // Uscita dal gruppo (consentita anche con saldo diverso da zero)
@@ -131,27 +110,6 @@ export function GroupSettingsModal({
     [group.id, transfers, allGroups, nameMap]
   );
 
-  useEffect(() => {
-    if (open) {
-      setName(group.name);
-      setDescription(group.description);
-      setConfirmLeave(false);
-      setCatName('');
-      setShowClosePanel(initialFocusClose);
-      if (transfers.length > 0 && transferTargets.eligible.length > 0) {
-        setCloseMode('transfer');
-        setTargetGroupId(transferTargets.eligible[0].group.id);
-      } else {
-        setCloseMode('keep');
-        setTargetGroupId(transferTargets.eligible[0]?.group.id ?? '');
-      }
-      setFxStr('1');
-      setFxDate(todayISO());
-      setFxManual(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, group.id, initialFocusClose]);
-
   const selectedTargetGroup: ExpenseGroup | null = useMemo(() => {
     if (transfers.length === 0 || closeMode !== 'transfer' || !targetGroupId) return null;
     return transferTargets.eligible.find((g) => g.group.id === targetGroupId)?.group ?? null;
@@ -160,38 +118,37 @@ export function GroupSettingsModal({
   const needsFx =
     selectedTargetGroup !== null && selectedTargetGroup.baseCurrency !== group.baseCurrency;
 
+  const fx = useExchangeRate(
+    open && showClosePanel && needsFx,
+    group.baseCurrency,
+    selectedTargetGroup?.baseCurrency ?? group.baseCurrency,
+    todayISO()
+  );
+  const {
+    reset: resetRate,
+    rate: parsedFx,
+    rateDate: fxDate,
+    manual: fxManual,
+    loading: loadingFx,
+  } = fx;
+
   useEffect(() => {
-    if (!open || !showClosePanel || !selectedTargetGroup) return;
-    if (selectedTargetGroup.baseCurrency === group.baseCurrency) {
-      setFxStr('1');
-      setFxDate(todayISO());
-      setFxManual(false);
-      return;
+    if (open) {
+      setName(group.name);
+      setDescription(group.description);
+      setConfirmLeave(false);
+      setShowClosePanel(initialFocusClose);
+      if (transfers.length > 0 && transferTargets.eligible.length > 0) {
+        setCloseMode('transfer');
+        setTargetGroupId(transferTargets.eligible[0].group.id);
+      } else {
+        setCloseMode('keep');
+        setTargetGroupId(transferTargets.eligible[0]?.group.id ?? '');
+      }
+      resetRate();
     }
-    if (fxManual) return;
-
-    let cancelled = false;
-    setLoadingFx(true);
-    fetchExchangeRate(group.baseCurrency, selectedTargetGroup.baseCurrency)
-      .then((res) => {
-        if (cancelled) return;
-        setFxStr(String(res.rate).replace('.', ','));
-        setFxDate(res.effectiveDate);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingFx(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, showClosePanel, selectedTargetGroup, group.baseCurrency, fxManual]);
-
-  const parsedFx = useMemo(() => {
-    if (!needsFx) return 1;
-    const v = parseDecimalInput(fxStr);
-    return v !== null && v > 0 ? v : 0;
-  }, [needsFx, fxStr]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, group.id, initialFocusClose, resetRate]);
 
   const activeMembers = members.filter((m) => m.leftAt === null);
   const myBalance = balances.find((b) => b.userId === currentUserId)?.netBalance ?? 0;
@@ -208,30 +165,6 @@ export function GroupSettingsModal({
       onToast(translateErrorIT(err), true);
     } finally {
       setSavingGroup(false);
-    }
-  };
-
-  const handleCreateCat = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!catName.trim()) return;
-    setAddingCat(true);
-    try {
-      await onAddCategory({ name: catName.trim(), icon: catIcon, color: catColor });
-      setCatName('');
-      onToast('Categoria personalizzata aggiunta');
-    } catch (err) {
-      onToast(translateErrorIT(err), true);
-    } finally {
-      setAddingCat(false);
-    }
-  };
-
-  const handleDeleteCat = async (cat: CustomCategory) => {
-    try {
-      await onDeleteCategory(cat);
-      onToast(`Categoria "${cat.name}" rimossa`);
-    } catch (err) {
-      onToast(translateErrorIT(err), true);
     }
   };
 
@@ -447,7 +380,7 @@ export function GroupSettingsModal({
                               className="select select-sm"
                               value={targetGroupId}
                               onChange={(e) => {
-                                setFxManual(false);
+                                resetRate();
                                 setTargetGroupId(e.target.value);
                               }}
                             >
@@ -491,34 +424,24 @@ export function GroupSettingsModal({
                                     alignItems: 'center',
                                     gap: 4,
                                   }}
-                                  onClick={() => setFxManual(false)}
+                                  onClick={() => resetRate()}
                                   disabled={loadingFx}
                                 >
                                   <RefreshCw size={11} />{' '}
                                   {loadingFx ? 'Aggiorno…' : 'Cambio automatico'}
                                 </button>
                               </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: 13 }}>1 {group.baseCurrency} =</span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  className="input input-sm tabular"
-                                  style={{ width: 118 }}
-                                  value={fxStr}
-                                  onChange={(e) => {
-                                    setFxManual(true);
-                                    setFxStr(e.target.value);
-                                  }}
-                                />
-                                <span style={{ fontSize: 13 }}>
-                                  {selectedTargetGroup.baseCurrency}
-                                </span>
-                              </div>
+                              <RateInput
+                                key={targetGroupId}
+                                from={group.baseCurrency}
+                                to={selectedTargetGroup.baseCurrency}
+                                quote={fx.quote}
+                                onChange={fx.write}
+                              />
                               {parsedFx > 0 && (
                                 <span className="field-hint">
-                                  Tasso applicato: {formatRateValue(parsedFx)} (salvato senza
-                                  modifiche retroattive).
+                                  Tasso applicato: 1 {group.baseCurrency} = {formatRateValue(parsedFx)}{' '}
+                                  {selectedTargetGroup.baseCurrency}.
                                 </span>
                               )}
                             </div>
@@ -706,87 +629,13 @@ export function GroupSettingsModal({
           <>
             <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
 
-            {/* Categorie personalizzate */}
-            <div className="form-stack">
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 650 }}>Categorie personalizzate</div>
-                <div className="field-hint">
-                  Si aggiungono alle 12 categorie predefinite per tutti i membri del gruppo.
-                </div>
-              </div>
-
-              {customCategories.length > 0 && (
-                <div className="split-list">
-                  {customCategories.map((c) => (
-                    <div key={c.id} className="split-row">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <CategoryIcon icon={c.icon} color={c.color} boxed size={16} />
-                        <span style={{ fontSize: 14, fontWeight: 550 }}>{c.name}</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        onClick={() => handleDeleteCat(c)}
-                        aria-label={`Elimina categoria ${c.name}`}
-                        title="Rimuovi categoria"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <form className="fx-box" onSubmit={handleCreateCat}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    type="text"
-                    className="input input-sm"
-                    placeholder="Nuova categoria (es. Animali, Palestra…)"
-                    maxLength={40}
-                    value={catName}
-                    onChange={(e) => setCatName(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="btn btn-secondary btn-sm"
-                    disabled={addingCat || !catName.trim()}
-                  >
-                    <Plus size={14} />
-                    Aggiungi
-                  </button>
-                </div>
-                <div className="swatch-row">
-                  {CUSTOM_CATEGORY_ICONS.map((ic) => (
-                    <button
-                      key={ic.id}
-                      type="button"
-                      title={ic.label}
-                      className={`icon-swatch ${catIcon === ic.id ? 'active' : ''}`}
-                      onClick={() => setCatIcon(ic.id)}
-                    >
-                      <CategoryIcon
-                        icon={ic.id}
-                        color={catIcon === ic.id ? catColor : '#57534e'}
-                        size={15}
-                      />
-                    </button>
-                  ))}
-                </div>
-                <div className="swatch-row">
-                  {CUSTOM_CATEGORY_COLORS.map((col) => (
-                    <button
-                      key={col}
-                      type="button"
-                      className={`color-swatch ${catColor === col ? 'active' : ''}`}
-                      style={{ backgroundColor: col }}
-                      onClick={() => setCatColor(col)}
-                      aria-label={`Colore ${col}`}
-                    />
-                  ))}
-                </div>
-              </form>
-            </div>
+            <CategoryManager
+              categories={categories}
+              onSaveCategory={onSaveCategory}
+              onMoveCategory={onMoveCategory}
+              onDeleteCategory={onDeleteCategory}
+              onToast={onToast}
+            />
           </>
         )}
 

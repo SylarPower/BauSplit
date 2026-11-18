@@ -94,12 +94,16 @@ export function formatNumberIT(value: number, maxDecimals = 2, minDecimals = 0):
   });
 }
 
+/** Nei campi modificabili il punto deve poter significare decimale, mai migliaia. */
+export function formatDecimalInput(value: number, maxDecimals = 2): string {
+  return value.toLocaleString('it-IT', { useGrouping: false, maximumFractionDigits: maxDecimals });
+}
+
 export function formatRateValue(rate: number): string {
   if (!Number.isFinite(rate) || rate <= 0) return '—';
-  const decimals = rate >= 100 ? 2 : rate >= 1 ? 4 : 6;
   return rate.toLocaleString('it-IT', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: 8,
   });
 }
 

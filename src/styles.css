@@ -1786,3 +1786,32 @@ textarea.input { height: auto; resize: vertical; }
   .welcome-nav nav a { display: none; }
   .welcome-actions { align-items: stretch; flex-direction: column; }
 }
+
+/* Il verso del cambio è indipendente dalla valuta della spesa. */
+.rate-input, .rate-equation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rate-equation { font-size: 13.5px; color: var(--text-secondary); }
+.rate-equation .input { width: 112px; }
+
+.category-manager-heading, .category-manager-row, .category-manager-actions,
+.category-editor-buttons, .category-appearance, .category-visibility { display: flex; align-items: center; gap: 8px; }
+.category-manager-heading { justify-content: space-between; flex-wrap: wrap; }
+.category-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 6px; cursor: pointer; }
+.category-panel > summary::-webkit-details-marker { display: none; }
+.category-panel > summary strong { display: block; font-size: 14px; font-weight: 650; }
+.category-panel > summary small { color: var(--text-secondary); }
+.category-panel[open] > summary svg { transform: rotate(180deg); }
+.category-panel > .form-stack { margin-top: 12px; }
+.category-manager-list { list-style: none; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 12px; }
+.category-manager-list li + li { border-top: 1px solid var(--border); }
+.category-manager-row { padding: 7px 10px; }
+.category-manager-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 550; }
+.category-manager-name small, .category-visibility small { display: block; font-weight: 400; color: var(--text-secondary); }
+.category-manager-actions { gap: 2px; }
+.category-manager-actions .btn-icon:disabled { opacity: .35; }
+.category-manager-list .category-editor { margin: 0 8px 8px; }
+.category-editor { gap: 12px; }
+.category-appearance { align-items: flex-end; }
+.category-appearance .field:first-of-type { flex: 1; min-width: 0; }
+.category-color { width: 44px; height: 34px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: white; }
+.category-visibility { align-items: flex-start; font-size: 13.5px; }
+.category-editor-buttons { flex-wrap: wrap; }

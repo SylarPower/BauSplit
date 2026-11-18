@@ -1,7 +1,8 @@
 import type {
   ActivityChanges,
   ActivityLog,
-  CustomCategory,
+  CategoryOption,
+  CategoryPatch,
   CreateGroupInput,
   InviteChoice,
   Expense,
@@ -35,6 +36,7 @@ import {
   buildSettlementUpdatedLog,
   SPLIT_MODE_LABELS,
 } from './audit';
+import { withCurrentCategoryLabels } from './categories';
 import { fetchExchangeRate, formatMoney } from './currencies';
 import { formatFullDateIT, todayISO } from './dates';
 import {
@@ -124,17 +126,9 @@ export interface DataRepository {
     actorId: string;
   }): Promise<void>;
 
-  addCustomCategory(params: {
-    groupId: string;
-    actorId: string;
-    name: string;
-    icon: string;
-    color: string;
-  }): Promise<CustomCategory>;
-  deleteCustomCategory(params: {
-    category: CustomCategory;
-    actorId: string;
-  }): Promise<void>;
+  saveCategory(groupId: string, key: string | null, patch: CategoryPatch): Promise<string>;
+  moveCategory(groupId: string, key: string, step: -1 | 1): Promise<void>;
+  deleteCategory(groupId: string, key: string): Promise<void>;
 
   subscribeToGroup(groupId: string, onChange: () => void): () => void;
 }
@@ -725,11 +719,7 @@ export class SupabaseRepository implements DataRepository {
         .select(MEMBER_COLUMNS)
         .eq('group_id', groupId)
         .order('joined_at', { ascending: true }),
-      this.client
-        .from('group_categories')
-        .select('*')
-        .eq('group_id', groupId)
-        .order('name', { ascending: true }),
+      this.client.rpc('get_group_categories', { p_group_id: groupId }),
       this.client
         .from('expenses')
         .select('*')
@@ -771,15 +761,7 @@ export class SupabaseRepository implements DataRepository {
     const members = (membersRes.data ?? []).map(mapMember);
     const actorNames = new Map(members.map((m) => [m.ownerId, m.displayName]));
 
-    const customCategories: CustomCategory[] = (catRes.data ?? []).map((c) => ({
-      id: c.id,
-      groupId: c.group_id,
-      name: c.name,
-      icon: c.icon,
-      color: c.color,
-      createdBy: c.created_by,
-      createdAt: c.created_at,
-    }));
+    const categories: CategoryOption[] = catRes.data ?? [];
 
     const splitsByExpense = new Map<string, ExpenseSplit[]>();
     for (const s of splitsRes.data ?? []) {
@@ -881,10 +863,10 @@ export class SupabaseRepository implements DataRepository {
     return {
       group,
       members,
-      customCategories,
-      expenses,
+      categories,
+      expenses: withCurrentCategoryLabels(expenses, categories),
       settlements,
-      recurringExpenses,
+      recurringExpenses: withCurrentCategoryLabels(recurringExpenses, categories),
       activityLogs,
     };
   }
@@ -1108,6 +1090,9 @@ export class SupabaseRepository implements DataRepository {
           after: money,
         });
       }
+      if (before.category !== input.category) {
+        diffs.push({ field: 'Categoria', before: before.categoryLabel, after: input.categoryLabel });
+      }
       if (before.frequency !== input.frequency) {
         diffs.push({
           field: 'Frequenza',
@@ -1178,6 +1163,7 @@ export class SupabaseRepository implements DataRepository {
       changes: {
         snapshot: {
           Importo: money,
+          Categoria: input.categoryLabel,
           Frequenza: freqLabel,
           'Pagato da': nameOf(input.paidBy),
           Divisione: SPLIT_MODE_LABELS[input.splitMode],
@@ -1253,71 +1239,29 @@ export class SupabaseRepository implements DataRepository {
     });
   }
 
-  async addCustomCategory(params: {
-    groupId: string;
-    actorId: string;
-    name: string;
-    icon: string;
-    color: string;
-  }): Promise<CustomCategory> {
-    const clean = params.name.trim().slice(0, 40);
-    if (!clean) throw new Error('Inserisci un nome per la categoria.');
-
-    const { data, error } = await this.client
-      .from('group_categories')
-      .insert({
-        group_id: params.groupId,
-        name: clean,
-        icon: params.icon,
-        color: params.color,
-        created_by: params.actorId,
-      })
-      .select('*')
-      .single();
-    if (error) throw error;
-
-    await this.client.from('activity_logs').insert({
-      group_id: params.groupId,
-      actor_id: params.actorId,
-      entity_type: 'category',
-      entity_id: data.id,
-      action: 'created',
-      summary: `Ha creato la categoria personalizzata "${clean}"`,
-      changes: {},
+  async saveCategory(groupId: string, key: string | null, patch: CategoryPatch): Promise<string> {
+    const { data, error } = await this.client.rpc('save_group_category', {
+      p_group_id: groupId,
+      p_key: key,
+      p_name: patch.name,
+      p_icon: patch.icon,
+      p_color: patch.color,
+      p_hidden: patch.hidden,
     });
-
-    return {
-      id: data.id,
-      groupId: data.group_id,
-      name: data.name,
-      icon: data.icon,
-      color: data.color,
-      createdBy: data.created_by,
-      createdAt: data.created_at,
-    };
+    if (error) throw error;
+    return data;
   }
 
-  async deleteCustomCategory(params: {
-    category: CustomCategory;
-    actorId: string;
-  }): Promise<void> {
-    const { category, actorId } = params;
-    const { error } = await this.client
-      .from('group_categories')
-      .delete()
-      .eq('id', category.id)
-      .eq('group_id', category.groupId);
-    if (error) throw error;
-
-    await this.client.from('activity_logs').insert({
-      group_id: category.groupId,
-      actor_id: actorId,
-      entity_type: 'category',
-      entity_id: category.id,
-      action: 'deleted',
-      summary: `Ha eliminato la categoria personalizzata "${category.name}"`,
-      changes: {},
+  async moveCategory(groupId: string, key: string, step: -1 | 1): Promise<void> {
+    const { error } = await this.client.rpc('move_group_category', {
+      p_group_id: groupId, p_key: key, p_step: step,
     });
+    if (error) throw error;
+  }
+
+  async deleteCategory(groupId: string, key: string): Promise<void> {
+    const { error } = await this.client.rpc('delete_group_category', { p_group_id: groupId, p_key: key });
+    if (error) throw error;
   }
 
   subscribeToGroup(groupId: string, onChange: () => void): () => void {

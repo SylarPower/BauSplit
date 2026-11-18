@@ -1,6 +1,6 @@
 import type {
   CategoryInsight,
-  CustomCategory,
+  CategoryOption,
   Expense,
   ExpenseSplit,
   GroupInsights,
@@ -523,7 +523,7 @@ export function computeGroupInsights(
   expenses: Expense[],
   settlements: Settlement[],
   members: GroupMember[],
-  customCategories: CustomCategory[],
+  categories: CategoryOption[],
   baseCurrency: string,
   dateFrom = '',
   dateTo = ''
@@ -591,7 +591,7 @@ export function computeGroupInsights(
     if (!maxDate || exp.expenseDate > maxDate) maxDate = exp.expenseDate;
 
     // Categoria
-    const catInfo = resolveCategoryDisplay(exp.category, exp.categoryLabel, customCategories);
+    const catInfo = resolveCategoryDisplay(exp.category, exp.categoryLabel, categories);
     const catKey = catInfo.key;
     const catEntry = catMap.get(catKey) ?? {
       key: catKey,

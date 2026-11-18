@@ -13,8 +13,9 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 ## Cosa puoi fare nei gruppi
 
 - Dividere una spesa in **parti uguali, importi esatti o percentuali**, scegliendo pagante e partecipanti. Programmare spese ricorrenti, metterle in pausa o registrarle subito; le scadenze maturate vengono registrate all’apertura del gruppo.
-- Usare più valute: il **cambio della spesa resta salvato**. Puoi inserire un cambio manuale e scegliere separatamente la valuta in cui leggere i saldi, senza cambiare i conti.
-- Aggiungere categorie personalizzate, cercare e filtrare le spese, esportare il **CSV**, consultare **Insights** e **storico modifiche**. I rimborsi non gonfiano le statistiche di spesa.
+- Usare più valute. Se il gruppo è in euro e paghi in yen, premi **Inverti cambio** per scrivere **1 EUR = 160 JPY**: una spesa da 1.600 ¥ vale 10 €. Il pulsante cambia solo il modo di leggere o scrivere il tasso, non la valuta, l’importo o il cambio salvato. Lo trovi anche nei rimborsi, nelle ricorrenze e quando sposti un saldo tra gruppi con valute diverse. Nelle ricorrenze lascia vuoto il cambio fisso per usare quello automatico alla scadenza. La valuta in cui leggi i saldi si sceglie separatamente.
+- Da **Impostazioni del gruppo → Categorie del gruppo**, apri l’elenco e premi la matita per cambiare nome, icona o colore di qualsiasi categoria, anche predefinita. Usa le frecce per riordinarle. Il nuovo nome compare anche sulle **vecchie spese**, nelle ricerche, nei filtri, nelle ricorrenze, negli **Insights** e nel **CSV** di quel gruppo. Nello storico rimangono sia il nome di allora sia la successiva rinomina.
+- Se una categoria non ti serve più, scegli **Nascondi dalle nuove spese**: potrai renderla visibile di nuovo, senza perdere movimenti né interrompere le ricorrenze. Puoi eliminare una categoria personalizzata se nessuna spesa o ricorrenza la usa. Almeno una categoria deve restare visibile. I rimborsi restano esclusi dai totali di spesa degli Insights.
 - Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. L’ultimo partecipante viene avvisato prima di eliminare il gruppo.
 - Chiudere e riaprire un gruppo. Puoi lasciarvi i saldi oppure spostarli in un altro gruppo attivo dove sono presenti **tutte le persone coinvolte**, anche con una valuta diversa. Conta la persona che ha scelto il posto in entrambi i gruppi, non la semplice coincidenza fra due nomi. I gruppi chiusi rimangono consultabili ed esportabili.
 
@@ -24,7 +25,9 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 
 1. Apri il progetto che contiene già le tue spese (`mwicplgacecjaeyzbuhx`, se usi quello impostato nell’app). **Non creare un nuovo progetto e non cancellare tabelle.** Se contiene dati importanti, fai prima una copia di sicurezza.
 2. In questa versione del repository apri [**supabase/schema.sql**](./supabase/schema.sql) e copia **tutto** il contenuto del file.
-3. Nel progetto Supabase apri [**SQL Editor → New query**](https://supabase.com/dashboard/project/mwicplgacecjaeyzbuhx/sql/new), incolla il testo e premi **Run**. Aspetta la conferma di successo prima di proseguire. Questo aggiorna i gruppi esistenti senza ricreare conti, quote e cambi; puoi eseguirlo anche su un progetto vuoto. Se l’app rileva che manca l’aggiornamento, offre lo stesso file con **Copia script SQL**.
+3. Nel progetto Supabase apri [**SQL Editor → New query**](https://supabase.com/dashboard/project/mwicplgacecjaeyzbuhx/sql/new), incolla il testo e premi **Run**. Se Supabase chiede se aggiungere regole di accesso automatiche, scegli **Run without RLS** per questo script completo: contiene già le regole che proteggono i gruppi. Aspetta la conferma di successo prima di proseguire. Questo aggiorna i gruppi esistenti senza ricreare conti, quote e cambi; puoi eseguirlo anche su un progetto vuoto. Se l’app rileva che manca l’aggiornamento, offre lo stesso file con **Copia script SQL**.
+
+Se gli accessi funzionavano già nella versione precedente, non devi riconfigurarli per usare categorie e cambio: passa al punto 3.
 
 ### 2. Permetti entrambi i modi di entrare
 
