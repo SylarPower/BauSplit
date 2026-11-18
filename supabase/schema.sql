@@ -697,15 +697,14 @@ language sql stable security invoker set search_path = '' as $$
     select p.key, coalesce(o.v->>'name', p.name) as name, coalesce(o.v->>'icon', p.icon) as icon,
       coalesce(o.v->>'color', p.color) as color, coalesce((o.v->>'hidden')::boolean, false) as hidden, p.pos
     from g cross join (values
-      ('spesa', 'Spesa alimentare', 'shopping-basket', '#0F766E', 1),
+      ('spesa', 'Spesa', 'shopping-basket', '#0F766E', 1),
       ('ristoranti', 'Ristoranti e bar', 'utensils', '#C2410C', 2),
-      ('casa', 'Casa e affitto', 'home', '#1D4ED8', 3),
-      ('bollette', 'Bollette e utenze', 'zap', '#B45309', 4),
-      ('trasporti', 'Trasporti e auto', 'car', '#4338CA', 5),
-      ('viaggi', 'Viaggi e alloggi', 'plane', '#0369A1', 6),
-      ('svago', 'Svago e cultura', 'sparkles', '#7E22CE', 7),
+      ('casa', 'Casa', 'home', '#1D4ED8', 3),
+      ('trasporti', 'Trasporti', 'car', '#4338CA', 5),
+      ('viaggi', 'Viaggi', 'plane', '#0369A1', 6),
+      ('svago', 'Svago', 'sparkles', '#7E22CE', 7),
       ('shopping', 'Shopping', 'shopping-bag', '#BE185D', 8),
-      ('salute', 'Salute e benessere', 'heart-pulse', '#047857', 9),
+      ('salute', 'Salute', 'heart-pulse', '#047857', 9),
       ('abbonamenti', 'Abbonamenti', 'repeat', '#475569', 10),
       ('regali', 'Regali', 'gift', '#B91C1C', 11),
       ('altro', 'Altro', 'tag', '#78716C', 13)
@@ -713,7 +712,22 @@ language sql stable security invoker set search_path = '' as $$
     union all
     select 'custom:' || c.id, c.name, c.icon, c.color, c.hidden, 12
     from public.group_categories c where c.group_id = p_group_id
-  ) select c.key, c.name, c.icon, c.color, c.hidden from catalog c cross join g
+  ), old_bills as (
+    select category_presets->'bollette' as prefs, exists (select from catalog where not hidden) as has_other_visible
+    from g
+  ), full_catalog as (
+    select * from catalog
+    union all
+    -- Non è una predefinita: mantieni la chiave nei gruppi che la usano già.
+    -- Senza preferenze è solo storica, a meno che fosse l'unica categoria visibile.
+    -- Se il gruppo l'aveva personalizzata, ne conserva invece anche la visibilità.
+    select 'bollette', coalesce(prefs->>'name','Bollette e utenze'), coalesce(prefs->>'icon','zap'),
+      coalesce(prefs->>'color','#B45309'), coalesce((prefs->>'hidden')::boolean, prefs is null and has_other_visible), 4
+    from old_bills
+    where prefs is not null or not has_other_visible
+      or exists (select from public.expenses where group_id = p_group_id and category = 'bollette')
+      or exists (select from public.recurring_expenses where group_id = p_group_id and category = 'bollette')
+  ) select c.key, c.name, c.icon, c.color, c.hidden from full_catalog c cross join g
     order by array_position(g.category_order, c.key) nulls last, c.pos, lower(c.name), c.key;
 $$;
 
@@ -770,6 +784,10 @@ begin
       update public.group_categories set name = coalesce(v_name,name), icon = coalesce(p_icon,icon),
         color = coalesce(p_color,color), hidden = coalesce(p_hidden,hidden) where group_id = p_group_id and id = v_id;
     else
+      -- La prima rinomina di una categoria storica non deve renderla visibile da sola.
+      if p_key = 'bollette' and p_hidden is null then
+        v_patch := v_patch || jsonb_build_object('hidden', v_old.hidden);
+      end if;
       update public.expense_groups set category_presets = jsonb_set(category_presets, array[p_key],
         coalesce(category_presets->p_key, '{}'::jsonb) || v_patch) where id = p_group_id;
     end if;

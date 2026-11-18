@@ -249,15 +249,14 @@ describe('Catalogo categorie del gruppo', () => {
     const me = await member(a.id, guest);
     const original = await catalog(a.id);
     expect(original.map((c) => c.name)).toEqual([
-      'Spesa alimentare',
+      'Spesa',
       'Ristoranti e bar',
-      'Casa e affitto',
-      'Bollette e utenze',
-      'Trasporti e auto',
-      'Viaggi e alloggi',
-      'Svago e cultura',
+      'Casa',
+      'Trasporti',
+      'Viaggi',
+      'Svago',
       'Shopping',
-      'Salute e benessere',
+      'Salute',
       'Abbonamenti',
       'Regali',
       'Altro',
@@ -325,13 +324,83 @@ describe('Catalogo categorie del gruppo', () => {
       )
     ).toEqual({
       actor_id: friend,
-      summary: 'Ha rinominato la categoria "Spesa alimentare" in "Dispensa"',
+      summary: 'Ha rinominato la categoria "Spesa" in "Dispensa"',
     });
     await expect(db.query('select delete_group_category($1,$2)', [a.id, custom])).rejects.toThrow(
       /nasconderla/
     );
     await saveCategory(a.id, 'spesa', null, false);
     expect((await catalog(a.id))[1]).toMatchObject({ name: 'Dispensa', hidden: false });
+  });
+
+  it('mantiene Bollette nei gruppi con vecchie spese o ricorrenze, non nei nuovi gruppi', async () => {
+    await as(guest);
+    const a = await createGroup('Vecchia spesa');
+    const b = await createGroup('Solo ricorrenza');
+    const payerA = (await member(a.id, guest)).user_id;
+    const payerB = (await member(b.id, guest)).user_id;
+    await db.query(
+      `select save_expense($1,null,'Luce',45,'EUR',1,current_date,false,45,current_date,
+       'bollette','Bollette e utenze',$2,'equal','',$3,'created','Luce')`,
+      [a.id, payerA, JSON.stringify([{ user_id: payerA, amount: 45, base_amount: 45 }])]
+    );
+    await db.query(
+      `insert into recurring_expenses(group_id,description,amount,currency,category,category_label,paid_by,split_mode,splits,
+       frequency,start_date,next_due_date,created_by,updated_by) values ($1,'Internet',20,'EUR','bollette','Bollette e utenze',
+       $2,'equal',$3,'monthly',current_date,current_date,$4,$4)`,
+      [b.id, payerB, JSON.stringify([{ userId: payerB }]), guest]
+    );
+    for (const id of [a.id, b.id]) {
+      const cats = await catalog(id);
+      expect(cats.find((c) => c.key === 'bollette')).toMatchObject({
+        name: 'Bollette e utenze',
+        hidden: true,
+      });
+      expect(cats.filter((c) => !c.hidden)).toHaveLength(11);
+    }
+    await saveCategory(a.id, 'bollette', 'Utenze studio');
+    expect((await catalog(a.id)).find((c) => c.key === 'bollette')?.hidden).toBe(true);
+    await saveCategory(a.id, 'bollette', null, false);
+    await db.exec('reset role');
+    await db.exec(schema);
+    await as(guest);
+    expect((await catalog(a.id)).find((c) => c.key === 'bollette')).toMatchObject({
+      name: 'Utenze studio',
+      hidden: false,
+    });
+    expect(
+      await first('select category, base_amount from expenses where group_id=$1', [a.id])
+    ).toEqual({ category: 'bollette', base_amount: '45.00' });
+    expect(
+      await first('select category, active from recurring_expenses where group_id=$1', [b.id])
+    ).toEqual({ category: 'bollette', active: true });
+    expect((await catalog((await createGroup('Nuovo')).id)).some((c) => c.key === 'bollette')).toBe(
+      false
+    );
+  });
+
+  it('conserva una scelta precedente in cui solo Bollette era visibile', async () => {
+    await as(guest);
+    const g = await createGroup('Solo utenze');
+    const customized = await createGroup('Categoria personalizzata prima dell’aggiornamento');
+    const prefs = Object.fromEntries((await catalog(g.id)).map((c) => [c.key, { hidden: true }]));
+    // Stati validi nella versione con 12 predefinite, anche senza movimenti.
+    await db.exec('reset role');
+    await db.query('update expense_groups set category_presets=$2 where id=$1', [
+      g.id,
+      JSON.stringify(prefs),
+    ]);
+    await db.query('update expense_groups set category_presets=$2 where id=$1', [
+      customized.id,
+      JSON.stringify({ bollette: { name: 'Ufficio', icon: 'briefcase' } }),
+    ]);
+    await as(guest);
+    expect((await catalog(g.id)).filter((c) => !c.hidden).map((c) => c.key)).toEqual(['bollette']);
+    expect((await catalog(customized.id)).find((c) => c.key === 'bollette')).toMatchObject({
+      name: 'Ufficio',
+      icon: 'briefcase',
+      hidden: false,
+    });
   });
 
   it('controlla accesso, gruppo chiuso, chiavi, duplicati e ultima categoria visibile', async () => {
@@ -360,7 +429,7 @@ describe('Catalogo categorie del gruppo', () => {
     );
     await as(guest);
     await db.query('select close_expense_group($1)', [a.id]);
-    expect(await catalog(a.id)).toHaveLength(12);
+    expect(await catalog(a.id)).toHaveLength(11);
     await expect(saveCategory(a.id, null, 'Pulizie')).rejects.toThrow(/chiuso/);
     await expect(saveCategory(a.id, 'altro', 'Mio')).rejects.toThrow(/chiuso/);
   });
