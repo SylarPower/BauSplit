@@ -5,11 +5,7 @@ import {
   convertToBaseAmount,
   roundCurrency,
 } from '../lib/accounting';
-import {
-  entryCategories,
-  CUSTOM_CATEGORY_COLORS,
-  CUSTOM_CATEGORY_ICONS,
-} from '../lib/categories';
+import { CUSTOM_CATEGORY_ICONS, DEFAULT_CATEGORY_COLOR, entryCategories } from '../lib/categories';
 import {
   CURRENCIES,
   formatMoney,
@@ -36,6 +32,7 @@ import type {
   RecurringFrequency,
   SplitMode,
 } from '../types';
+import { CategoryColorPicker } from './CategoryColorPicker';
 import { Avatar, CategoryIcon } from './Icon';
 import { Modal } from './Modal';
 import { RateInput } from './RateInput';
@@ -115,7 +112,7 @@ export function ExpenseFormModal({
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('tag');
-  const [newCatColor, setNewCatColor] = useState(CUSTOM_CATEGORY_COLORS[0]);
+  const [newCatColor, setNewCatColor] = useState(DEFAULT_CATEGORY_COLOR);
   const [creatingCat, setCreatingCat] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -638,6 +635,7 @@ export function ExpenseFormModal({
                 type="button"
                 className="link-btn"
                 style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 2 }}
+                aria-expanded={showNewCat}
                 onClick={() => setShowNewCat((v) => !v)}
               >
                 <Plus size={13} />
@@ -668,6 +666,7 @@ export function ExpenseFormModal({
               <input
                 type="text"
                 className="input input-sm"
+                aria-label="Nome della categoria"
                 placeholder="Es. Animali, Palestra, Giardino"
                 maxLength={40}
                 value={newCatName}
@@ -699,18 +698,11 @@ export function ExpenseFormModal({
                 </button>
               ))}
             </div>
-            <div className="swatch-row">
-              {CUSTOM_CATEGORY_COLORS.map((col) => (
-                <button
-                  key={col}
-                  type="button"
-                  className={`color-swatch ${newCatColor === col ? 'active' : ''}`}
-                  style={{ backgroundColor: col }}
-                  onClick={() => setNewCatColor(col)}
-                  aria-label={`Colore ${col}`}
-                />
-              ))}
-            </div>
+            <CategoryColorPicker
+              value={newCatColor}
+              onChange={setNewCatColor}
+              disabled={creatingCat}
+            />
           </div>
         )}
 

@@ -1,8 +1,9 @@
 import { ArrowDown, ArrowUp, ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
-import { CUSTOM_CATEGORY_COLORS, CUSTOM_CATEGORY_ICONS } from '../lib/categories';
+import { CUSTOM_CATEGORY_ICONS, DEFAULT_CATEGORY_COLOR } from '../lib/categories';
 import { translateErrorIT } from '../lib/supabase';
 import type { CategoryOption, CategoryPatch } from '../types';
+import { CategoryColorPicker } from './CategoryColorPicker';
 import { CategoryIcon } from './Icon';
 
 export interface CategoryManagerProps {
@@ -151,13 +152,13 @@ function CategoryEditor({
 }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [icon, setIcon] = useState(initial?.icon ?? 'tag');
-  const [color, setColor] = useState(initial?.color ?? CUSTOM_CATEGORY_COLORS[0]);
+  const [color, setColor] = useState(initial?.color ?? DEFAULT_CATEGORY_COLOR);
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const patch: CategoryPatch = {};
   if (name.trim() !== initial?.name) patch.name = name.trim();
   if (icon !== initial?.icon) patch.icon = icon;
-  if (color !== initial?.color) patch.color = color;
+  if (color.toLowerCase() !== initial?.color.toLowerCase()) patch.color = color;
   if (initial && hidden !== initial.hidden) patch.hidden = hidden;
 
   const submit = (event: FormEvent) => {
@@ -197,16 +198,8 @@ function CategoryEditor({
             ))}
           </select>
         </label>
-        <label className="field">
-          <span className="field-label">Colore</span>
-          <input
-            type="color"
-            className="category-color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-          />
-        </label>
       </div>
+      <CategoryColorPicker value={color} onChange={setColor} disabled={busy} />
       {initial && (
         <label className="category-visibility">
           <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
