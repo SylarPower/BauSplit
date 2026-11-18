@@ -475,6 +475,7 @@ export function getUserExpenseImpact(
  */
 export function getGroupTransferTargets(params: {
   sourceGroupId: string;
+  sourceMembers: GroupMember[];
   transfers: SimplifiedTransfer[];
   allGroups: GroupOverview[];
   nameOf: (userId: string) => string;
@@ -491,6 +492,7 @@ export function getGroupTransferTargets(params: {
   }
   const involvedUserIds = Array.from(involvedSet);
 
+  const owners = new Map(params.sourceMembers.map((m) => [m.userId, m.ownerId]));
   const eligible: GroupOverview[] = [];
   const ineligible: { overview: GroupOverview; missingNames: string[] }[] = [];
 
@@ -498,8 +500,8 @@ export function getGroupTransferTargets(params: {
     if (ov.group.id === sourceGroupId) continue;
     if (ov.group.closedAt !== null) continue;
 
-    const targetMemberIds = new Set(ov.members.map((m) => m.userId));
-    const missing = involvedUserIds.filter((uid) => !targetMemberIds.has(uid));
+    const targetOwners = new Set(ov.members.map((m) => m.ownerId).filter(Boolean));
+    const missing = involvedUserIds.filter((uid) => !targetOwners.has(owners.get(uid) ?? null));
     if (missing.length === 0) {
       eligible.push(ov);
     } else {

@@ -24,8 +24,26 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+// Due accessi separati: una conferma email o un login non sovrascrivono mai
+// l'unica credenziale che dimostra di essere l'ospite su questo dispositivo.
+export const guestClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storageKey: `bausplit:${SUPABASE_URL}:guest`,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+  },
+});
+
+export async function linkDeviceGroups(guestId: string, accountId: string): Promise<void> {
+  const permission = await guestClient.rpc('authorize_guest_link', { p_account_id: accountId });
+  if (permission.error) throw permission.error;
+  const linked = await supabase.rpc('link_guest_groups', { p_guest_id: guestId });
+  if (linked.error) throw linked.error;
+}
+
 /**
- * Restituisce l'URL base pulito dell'app (compatibile sia con GitHub Pages `/todolist/`
+ * Restituisce l'URL base pulito dell'app (compatibile sia con GitHub Pages `/BauSplit/`
  * sia con dominio root `/`).
  */
 export function getAppBaseUrl(): string {
@@ -78,7 +96,11 @@ export function extractInviteToken(input: string): string | null {
   return null;
 }
 
-const PENDING_INVITE_STORAGE_KEY = 'conti_insieme_pending_invite';
+const PENDING_INVITE_STORAGE_KEY = `bausplit:${SUPABASE_URL}:invite`;
+
+export function storePendingInviteToken(token: string) {
+  try { localStorage.setItem(PENDING_INVITE_STORAGE_KEY, token); } catch { /* Il link funziona anche senza segnalibro. */ }
+}
 
 export function readAndStoreUrlInviteToken(): string | null {
   try {
@@ -86,7 +108,7 @@ export function readAndStoreUrlInviteToken(): string | null {
     const token = url.searchParams.get('invito') || url.searchParams.get('invite');
     if (token && token.trim()) {
       const clean = token.trim();
-      localStorage.setItem(PENDING_INVITE_STORAGE_KEY, clean);
+      storePendingInviteToken(clean);
       return clean;
     }
     return localStorage.getItem(PENDING_INVITE_STORAGE_KEY);
@@ -154,6 +176,8 @@ export function isMissingSchemaError(err: unknown): boolean {
   return (
     code === 'PGRST205' ||
     code === 'PGRST202' ||
+    code === 'PGRST200' ||
+    code === '42703' ||
     code === '42P01' ||
     code === '42883' ||
     msg.includes('could not find the table') ||
@@ -173,6 +197,9 @@ export function translateErrorIT(err: unknown): string {
 
   const lower = raw.toLowerCase();
 
+  if (lower.includes('anonymous sign-ins are disabled') || lower.includes('anonymous sign-ins are not enabled')) {
+    return 'L’accesso senza account non è ancora attivo. Chi gestisce BauSplit deve abilitare “Allow anonymous sign-ins” in Supabase.';
+  }
   if (lower.includes('invalid login credentials')) {
     return 'Email o password non corretti.';
   }

@@ -2,6 +2,8 @@ import type {
   ActivityChanges,
   ActivityLog,
   CustomCategory,
+  CreateGroupInput,
+  InviteChoice,
   Expense,
   ExpenseGroup,
   ExpenseInput,
@@ -43,16 +45,11 @@ import {
 import { supabase } from './supabase';
 
 export interface DataRepository {
-  readonly isDemo: boolean;
-  ensureProfile(userId: string, fallbackEmail: string, fallbackName?: string): Promise<UserProfile>;
+  ensureProfile(): Promise<UserProfile>;
   updateProfileName(userId: string, displayName: string): Promise<UserProfile>;
 
   listGroupOverviews(currentUserId: string): Promise<GroupOverview[]>;
-  createGroup(params: {
-    name: string;
-    description: string;
-    baseCurrency: string;
-  }): Promise<ExpenseGroup>;
+  createGroup(params: CreateGroupInput): Promise<ExpenseGroup>;
   updateGroup(params: {
     groupId: string;
     actorId: string;
@@ -74,8 +71,9 @@ export interface DataRepository {
   }): Promise<{ transferredCount: number }>;
   reopenGroup(groupId: string, actorId: string): Promise<void>;
 
+  addParticipant(groupId: string, name: string): Promise<void>;
   getInvitePreview(token: string): Promise<InvitePreview>;
-  acceptInvite(token: string): Promise<string>;
+  acceptInvite(token: string, choice: InviteChoice): Promise<string>;
   regenerateInvite(groupId: string): Promise<string>;
   setInviteEnabled(groupId: string, enabled: boolean): Promise<boolean>;
 
@@ -198,7 +196,7 @@ export function buildCounterpartHint(
  * e registra automaticamente le relative spese nel gruppo.
  */
 export async function processDueRecurringExpenses(params: {
-  repo: DataRepository;
+  repo: Pick<DataRepository, 'saveExpense' | 'setRecurringActive'>;
   actorId: string;
   data: GroupData;
   onlyRecurringId?: string;
@@ -372,85 +370,41 @@ function mapGroup(row: Record<string, unknown>): ExpenseGroup {
   };
 }
 
+const MEMBER_COLUMNS = 'group_id, user_id, owner_id, display_name, joined_at, left_at, profiles!group_members_owner_id_fkey(display_name)';
+
+type DisplayProfile = { display_name: string };
+function mapMember(row: { user_id: string; owner_id: string | null; display_name: string | null;
+  joined_at: string; left_at: string | null; profiles: DisplayProfile | DisplayProfile[] | null }): GroupMember {
+  const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  return { userId: row.user_id, ownerId: row.owner_id, displayName: row.display_name ?? profile?.display_name ?? 'Membro',
+    joinedAt: row.joined_at, leftAt: row.left_at };
+}
+
 export class SupabaseRepository implements DataRepository {
-  readonly isDemo = false;
+  constructor(private readonly client = supabase) {}
 
-  async ensureProfile(
-    userId: string,
-    fallbackEmail: string,
-    fallbackName?: string
-  ): Promise<UserProfile> {
-    const { data, error } = await supabase.rpc('ensure_current_profile');
-    if (error) {
-      // Fallback diretto sulla tabella se necessario
-      const { data: existing, error: selErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-      if (selErr) throw selErr;
-      if (existing) {
-        return {
-          id: existing.id,
-          email: existing.email,
-          displayName: existing.display_name,
-          createdAt: existing.created_at,
-        };
-      }
-      const displayName = (fallbackName?.trim() || fallbackEmail.split('@')[0] || 'Utente').slice(
-        0,
-        60
-      );
-      const { data: inserted, error: insErr } = await supabase
-        .from('profiles')
-        .insert({ id: userId, email: fallbackEmail, display_name: displayName })
-        .select('*')
-        .single();
-      if (insErr) throw insErr;
-      return {
-        id: inserted.id,
-        email: inserted.email,
-        displayName: inserted.display_name,
-        createdAt: inserted.created_at,
-      };
-    }
-
-    const row = data as Record<string, unknown>;
-    return {
-      id: String(row.id),
-      email: String(row.email ?? fallbackEmail),
-      displayName: String(row.display_name ?? fallbackName ?? 'Utente'),
-      createdAt: String(row.created_at ?? ''),
-    };
+  async ensureProfile(): Promise<UserProfile> {
+    const { data, error } = await this.client.rpc('ensure_current_profile').single<{ id: string; email: string; display_name: string; created_at: string }>();
+    if (error) throw error;
+    return { id: data.id, email: data.email, displayName: data.display_name, createdAt: data.created_at };
   }
 
   async updateProfileName(userId: string, displayName: string): Promise<UserProfile> {
     const clean = displayName.trim().slice(0, 60);
     if (!clean) throw new Error('Inserisci un nome valido.');
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ display_name: clean })
-      .eq('id', userId)
-      .select('*')
-      .single();
+    const { error } = await this.client.from('profiles').update({ display_name: clean }).eq('id', userId);
     if (error) throw error;
-
-    // Aggiorna anche i metadati auth in background
-    await supabase.auth.updateUser({ data: { display_name: clean } }).catch(() => {});
-
-    return {
-      id: data.id,
-      email: data.email,
-      displayName: data.display_name,
-      createdAt: data.created_at,
-    };
+    await this.client.auth.updateUser({ data: { display_name: clean } }).catch(() => {});
+    return this.ensureProfile();
   }
 
   async listGroupOverviews(currentUserId: string): Promise<GroupOverview[]> {
-    const { data: groupRows, error: gErr } = await supabase
+    const { data: groupRows, error: gErr } = await this.client
       .from('expense_groups')
-      .select('*')
+      .select('*, group_members!inner(owner_id, left_at)')
+      .eq('group_members.owner_id', currentUserId)
+      .is('group_members.left_at', null)
       .order('updated_at', { ascending: false });
     if (gErr) throw gErr;
     if (!groupRows || groupRows.length === 0) return [];
@@ -459,19 +413,19 @@ export class SupabaseRepository implements DataRepository {
     const groupIds = groups.map((g) => g.id);
 
     const [membersRes, expensesRes, splitsRes, settlementsRes] = await Promise.all([
-      supabase
+      this.client
         .from('group_members')
-        .select('group_id, user_id, joined_at, left_at, profiles(id, email, display_name)')
+        .select(MEMBER_COLUMNS)
         .in('group_id', groupIds),
-      supabase
+      this.client
         .from('expenses')
         .select('id, group_id, paid_by, base_amount, amount, currency, exchange_rate, rate_date, rate_is_manual, expense_date, category, category_label, description, split_mode, note, recurring_id, recurring_occurrence_date, created_by, updated_by, created_at, updated_at')
         .in('group_id', groupIds),
-      supabase
+      this.client
         .from('expense_splits')
         .select('expense_id, group_id, user_id, amount, base_amount, percentage')
         .in('group_id', groupIds),
-      supabase
+      this.client
         .from('settlements')
         .select('*')
         .in('group_id', groupIds),
@@ -497,16 +451,7 @@ export class SupabaseRepository implements DataRepository {
     return groups.map((group) => {
       const allMembers: GroupMember[] = (membersRes.data ?? [])
         .filter((m) => m.group_id === group.id)
-        .map((m) => {
-          const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-          return {
-            userId: m.user_id,
-            displayName: prof?.display_name ?? 'Membro',
-            email: prof?.email ?? '',
-            joinedAt: m.joined_at,
-            leftAt: m.left_at,
-          };
-        });
+        .map(mapMember);
 
       const expenses: Expense[] = (expensesRes.data ?? [])
         .filter((e) => e.group_id === group.id)
@@ -559,7 +504,7 @@ export class SupabaseRepository implements DataRepository {
         }));
 
       const { myNetBalance, counterpartHint, totalSpentBase } = buildCounterpartHint(
-        currentUserId,
+        allMembers.find((m) => m.ownerId === currentUserId && m.leftAt === null)?.userId ?? '',
         allMembers,
         expenses,
         settlements,
@@ -577,16 +522,13 @@ export class SupabaseRepository implements DataRepository {
     });
   }
 
-  async createGroup(params: {
-    name: string;
-    description: string;
-    baseCurrency: string;
-  }): Promise<ExpenseGroup> {
-    const { data, error } = await supabase.rpc('create_expense_group', {
+  async createGroup(params: CreateGroupInput): Promise<ExpenseGroup> {
+    const { data, error } = await this.client.rpc('create_expense_group', {
       p_name: params.name.trim(),
       p_description: params.description.trim(),
       p_base_currency: params.baseCurrency.toUpperCase(),
-    });
+      p_participants: params.participants,
+    }).single();
     if (error) throw error;
     return mapGroup(data as Record<string, unknown>);
   }
@@ -603,7 +545,7 @@ export class SupabaseRepository implements DataRepository {
     const cleanDesc = params.description.trim().slice(0, 280);
     if (!cleanName) throw new Error('Il nome del gruppo non può essere vuoto.');
 
-    const { error } = await supabase
+    const { error } = await this.client
       .from('expense_groups')
       .update({ name: cleanName, description: cleanDesc })
       .eq('id', params.groupId);
@@ -621,7 +563,7 @@ export class SupabaseRepository implements DataRepository {
       });
     }
     if (diffs.length > 0) {
-      await supabase.from('activity_logs').insert({
+      await this.client.from('activity_logs').insert({
         group_id: params.groupId,
         actor_id: params.actorId,
         entity_type: 'group',
@@ -634,7 +576,7 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async leaveGroup(groupId: string): Promise<{ groupDeleted: boolean }> {
-    const { data, error } = await supabase.rpc('leave_group', { p_group_id: groupId });
+    const { data, error } = await this.client.rpc('leave_group', { p_group_id: groupId });
     if (error) throw error;
     const obj = (data ?? {}) as { group_deleted?: boolean };
     return { groupDeleted: Boolean(obj.group_deleted) };
@@ -686,7 +628,7 @@ export class SupabaseRepository implements DataRepository {
         .join(' · ');
     }
 
-    const { data, error } = await supabase.rpc('close_expense_group', {
+    const { data, error } = await this.client.rpc('close_expense_group', {
       p_source_group_id: sourceGroup.id,
       p_target_group_id: targetGroup ? targetGroup.id : null,
       p_transfers: payloadTransfers,
@@ -701,12 +643,17 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async reopenGroup(groupId: string): Promise<void> {
-    const { error } = await supabase.rpc('reopen_expense_group', { p_group_id: groupId });
+    const { error } = await this.client.rpc('reopen_expense_group', { p_group_id: groupId });
+    if (error) throw error;
+  }
+
+  async addParticipant(groupId: string, name: string): Promise<void> {
+    const { error } = await this.client.rpc('add_group_participant', { p_group_id: groupId, p_name: name.trim() });
     if (error) throw error;
   }
 
   async getInvitePreview(token: string): Promise<InvitePreview> {
-    const { data, error } = await supabase.rpc('get_invite_preview', { p_token: token });
+    const { data, error } = await this.client.rpc('get_invite_preview', { p_token: token });
     if (error) throw error;
     const raw = (data ?? {}) as Record<string, unknown>;
     if (!raw.valid) {
@@ -729,17 +676,23 @@ export class SupabaseRepository implements DataRepository {
       createdByName: String(raw.created_by_name ?? 'Un membro'),
       memberCount: Number(raw.member_count ?? 1),
       alreadyMember: Boolean(raw.already_member),
+      availableNames: (raw.available_names ?? []) as { id: string; name: string }[],
+      returningName: raw.returning_name ? String(raw.returning_name) : undefined,
     };
   }
 
-  async acceptInvite(token: string): Promise<string> {
-    const { data, error } = await supabase.rpc('accept_group_invite', { p_token: token });
+  async acceptInvite(token: string, choice: InviteChoice): Promise<string> {
+    const { data, error } = await this.client.rpc('accept_group_invite', {
+      p_token: token,
+      p_member_id: choice && 'memberId' in choice ? choice.memberId : null,
+      p_name: choice && 'name' in choice ? choice.name : null,
+    });
     if (error) throw error;
     return String(data);
   }
 
   async regenerateInvite(groupId: string): Promise<string> {
-    const { data, error } = await supabase.rpc('regenerate_group_invite', {
+    const { data, error } = await this.client.rpc('regenerate_group_invite', {
       p_group_id: groupId,
     });
     if (error) throw error;
@@ -747,7 +700,7 @@ export class SupabaseRepository implements DataRepository {
   }
 
   async setInviteEnabled(groupId: string, enabled: boolean): Promise<boolean> {
-    const { data, error } = await supabase.rpc('set_group_invite_enabled', {
+    const { data, error } = await this.client.rpc('set_group_invite_enabled', {
       p_group_id: groupId,
       p_enabled: enabled,
     });
@@ -766,39 +719,39 @@ export class SupabaseRepository implements DataRepository {
       recRes,
       logsRes,
     ] = await Promise.all([
-      supabase.from('expense_groups').select('*').eq('id', groupId).single(),
-      supabase
+      this.client.from('expense_groups').select('*').eq('id', groupId).single(),
+      this.client
         .from('group_members')
-        .select('group_id, user_id, joined_at, left_at, profiles(id, email, display_name)')
+        .select(MEMBER_COLUMNS)
         .eq('group_id', groupId)
         .order('joined_at', { ascending: true }),
-      supabase
+      this.client
         .from('group_categories')
         .select('*')
         .eq('group_id', groupId)
         .order('name', { ascending: true }),
-      supabase
+      this.client
         .from('expenses')
         .select('*')
         .eq('group_id', groupId)
         .order('expense_date', { ascending: false })
         .order('created_at', { ascending: false }),
-      supabase.from('expense_splits').select('*').eq('group_id', groupId),
-      supabase
+      this.client.from('expense_splits').select('*').eq('group_id', groupId),
+      this.client
         .from('settlements')
         .select('*')
         .eq('group_id', groupId)
         .order('settlement_date', { ascending: false })
         .order('created_at', { ascending: false }),
-      supabase
+      this.client
         .from('recurring_expenses')
         .select('*')
         .eq('group_id', groupId)
         .order('active', { ascending: false })
         .order('next_due_date', { ascending: true }),
-      supabase
+      this.client
         .from('activity_logs')
-        .select('*, profiles(id, display_name)')
+        .select('*')
         .eq('group_id', groupId)
         .order('created_at', { ascending: false })
         .limit(300),
@@ -815,18 +768,8 @@ export class SupabaseRepository implements DataRepository {
 
     const group = mapGroup(groupRes.data as Record<string, unknown>);
 
-    const members: GroupMember[] = (membersRes.data ?? []).map((m) => {
-      const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-      return {
-        userId: m.user_id,
-        displayName: prof?.display_name ?? 'Membro',
-        email: prof?.email ?? '',
-        joinedAt: m.joined_at,
-        leftAt: m.left_at,
-      };
-    });
-
-    const memberNames = new Map(members.map((m) => [m.userId, m.displayName]));
+    const members = (membersRes.data ?? []).map(mapMember);
+    const actorNames = new Map(members.map((m) => [m.ownerId, m.displayName]));
 
     const customCategories: CustomCategory[] = (catRes.data ?? []).map((c) => ({
       id: c.id,
@@ -921,12 +864,11 @@ export class SupabaseRepository implements DataRepository {
     }));
 
     const activityLogs: ActivityLog[] = (logsRes.data ?? []).map((l) => {
-      const prof = Array.isArray(l.profiles) ? l.profiles[0] : l.profiles;
       return {
         id: l.id,
         groupId: l.group_id,
         actorId: l.actor_id,
-        actorName: prof?.display_name ?? memberNames.get(l.actor_id) ?? 'Membro',
+        actorName: l.actor_name ?? actorNames.get(l.actor_id) ?? 'Membro',
         entityType: l.entity_type,
         entityId: l.entity_id,
         action: l.action,
@@ -968,7 +910,7 @@ export class SupabaseRepository implements DataRepository {
       percentage: s.percentage,
     }));
 
-    const { data, error } = await supabase.rpc('save_expense', {
+    const { data, error } = await this.client.rpc('save_expense', {
       p_group_id: input.groupId,
       p_expense_id: input.id ?? null,
       p_description: input.description.trim(),
@@ -1002,7 +944,7 @@ export class SupabaseRepository implements DataRepository {
     nameOf: (userId: string) => string;
   }): Promise<void> {
     const log = buildExpenseDeletedLog(params.expense, params.baseCurrency, params.nameOf);
-    const { error } = await supabase.rpc('delete_expense', {
+    const { error } = await this.client.rpc('delete_expense', {
       p_expense_id: params.expense.id,
       p_log_summary: log.summary,
       p_log_changes: log.changes,
@@ -1023,7 +965,7 @@ export class SupabaseRepository implements DataRepository {
     }
 
     if (input.id && before) {
-      const { data, error } = await supabase
+      const { data, error } = await this.client
         .from('settlements')
         .update({
           from_user: input.fromUser,
@@ -1045,7 +987,7 @@ export class SupabaseRepository implements DataRepository {
       if (error) throw error;
 
       const log = buildSettlementUpdatedLog(before, input, baseCurrency, nameOf);
-      await supabase.from('activity_logs').insert({
+      await this.client.from('activity_logs').insert({
         group_id: input.groupId,
         actor_id: actorId,
         entity_type: 'settlement',
@@ -1057,7 +999,7 @@ export class SupabaseRepository implements DataRepository {
       return data.id;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('settlements')
       .insert({
         group_id: input.groupId,
@@ -1079,7 +1021,7 @@ export class SupabaseRepository implements DataRepository {
     if (error) throw error;
 
     const log = buildSettlementCreatedLog(input, baseCurrency, nameOf);
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: input.groupId,
       actor_id: actorId,
       entity_type: 'settlement',
@@ -1098,7 +1040,7 @@ export class SupabaseRepository implements DataRepository {
     nameOf: (userId: string) => string;
   }): Promise<void> {
     const { settlement, actorId, baseCurrency, nameOf } = params;
-    const { error } = await supabase
+    const { error } = await this.client
       .from('settlements')
       .delete()
       .eq('id', settlement.id)
@@ -1106,7 +1048,7 @@ export class SupabaseRepository implements DataRepository {
     if (error) throw error;
 
     const log = buildSettlementDeletedLog(settlement, baseCurrency, nameOf);
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: settlement.groupId,
       actor_id: actorId,
       entity_type: 'settlement',
@@ -1129,7 +1071,7 @@ export class SupabaseRepository implements DataRepository {
     const money = formatMoney(input.amount, input.currency);
 
     if (input.id && before) {
-      const { data, error } = await supabase
+      const { data, error } = await this.client
         .from('recurring_expenses')
         .update({
           description: input.description.trim(),
@@ -1188,7 +1130,7 @@ export class SupabaseRepository implements DataRepository {
         });
       }
 
-      await supabase.from('activity_logs').insert({
+      await this.client.from('activity_logs').insert({
         group_id: input.groupId,
         actor_id: actorId,
         entity_type: 'recurring',
@@ -1200,7 +1142,7 @@ export class SupabaseRepository implements DataRepository {
       return data.id;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('recurring_expenses')
       .insert({
         group_id: input.groupId,
@@ -1226,7 +1168,7 @@ export class SupabaseRepository implements DataRepository {
       .single();
     if (error) throw error;
 
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: input.groupId,
       actor_id: actorId,
       entity_type: 'recurring',
@@ -1259,7 +1201,7 @@ export class SupabaseRepository implements DataRepository {
     };
     if (nextDueDate) patch.next_due_date = nextDueDate;
 
-    const { error } = await supabase
+    const { error } = await this.client
       .from('recurring_expenses')
       .update(patch)
       .eq('id', recurring.id)
@@ -1268,7 +1210,7 @@ export class SupabaseRepository implements DataRepository {
 
     // Registra nello storico solo quando l'utente mette in pausa o riattiva esplicitamente
     if (!nextDueDate && recurring.active !== active) {
-      await supabase.from('activity_logs').insert({
+      await this.client.from('activity_logs').insert({
         group_id: recurring.groupId,
         actor_id: actorId,
         entity_type: 'recurring',
@@ -1287,14 +1229,14 @@ export class SupabaseRepository implements DataRepository {
     actorId: string;
   }): Promise<void> {
     const { recurring, actorId } = params;
-    const { error } = await supabase
+    const { error } = await this.client
       .from('recurring_expenses')
       .delete()
       .eq('id', recurring.id)
       .eq('group_id', recurring.groupId);
     if (error) throw error;
 
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: recurring.groupId,
       actor_id: actorId,
       entity_type: 'recurring',
@@ -1321,7 +1263,7 @@ export class SupabaseRepository implements DataRepository {
     const clean = params.name.trim().slice(0, 40);
     if (!clean) throw new Error('Inserisci un nome per la categoria.');
 
-    const { data, error } = await supabase
+    const { data, error } = await this.client
       .from('group_categories')
       .insert({
         group_id: params.groupId,
@@ -1334,7 +1276,7 @@ export class SupabaseRepository implements DataRepository {
       .single();
     if (error) throw error;
 
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: params.groupId,
       actor_id: params.actorId,
       entity_type: 'category',
@@ -1360,14 +1302,14 @@ export class SupabaseRepository implements DataRepository {
     actorId: string;
   }): Promise<void> {
     const { category, actorId } = params;
-    const { error } = await supabase
+    const { error } = await this.client
       .from('group_categories')
       .delete()
       .eq('id', category.id)
       .eq('group_id', category.groupId);
     if (error) throw error;
 
-    await supabase.from('activity_logs').insert({
+    await this.client.from('activity_logs').insert({
       group_id: category.groupId,
       actor_id: actorId,
       entity_type: 'category',
@@ -1385,7 +1327,7 @@ export class SupabaseRepository implements DataRepository {
       debounceTimer = setTimeout(() => onChange(), 250);
     };
 
-    const channel = supabase
+    const channel = this.client
       .channel(`group_${groupId}`)
       .on(
         'postgres_changes',
@@ -1417,11 +1359,12 @@ export class SupabaseRepository implements DataRepository {
         { event: '*', schema: 'public', table: 'expense_groups', filter: `id=eq.${groupId}` },
         trigger
       )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity_logs', filter: `group_id=eq.${groupId}` }, trigger)
       .subscribe();
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
+      this.client.removeChannel(channel);
     };
   }
 }

@@ -14,9 +14,9 @@ import { advanceRecurringDate, collectDueOccurrences } from './recurring';
 import { extractInviteToken } from './supabase';
 
 const MEMBERS: GroupMember[] = [
-  { userId: 'u1', displayName: 'Marco', email: 'marco@test.it', joinedAt: '2026-01-01', leftAt: null },
-  { userId: 'u2', displayName: 'Giulia', email: 'giulia@test.it', joinedAt: '2026-01-01', leftAt: null },
-  { userId: 'u3', displayName: 'Luca', email: 'luca@test.it', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u1', ownerId: 'u1', displayName: 'Marco', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u2', ownerId: 'u2', displayName: 'Giulia', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u3', ownerId: 'u3', displayName: 'Luca', joinedAt: '2026-01-01', leftAt: null },
 ];
 
 function makeExpense(partial: Partial<Expense> & Pick<Expense, 'id' | 'paidBy' | 'baseAmount' | 'splits'>): Expense {
@@ -340,7 +340,7 @@ describe('ricorrenze, numeri, inviti, audit e CSV', () => {
 
   it('estrae il token invito da URL GitHub Pages o codice diretto', () => {
     expect(
-      extractInviteToken('https://sylarpower.github.io/todolist/?invito=abc123456789')
+      extractInviteToken('https://sylarpower.github.io/BauSplit/?invito=abc123456789')
     ).toBe('abc123456789');
     expect(extractInviteToken('abc123456789')).toBe('abc123456789');
   });

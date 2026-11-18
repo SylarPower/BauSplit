@@ -7,7 +7,7 @@ import {
   getGroupTransferTargets,
   simplifyDebts,
 } from './accounting';
-import { DemoRepository, resetDemoDatabase } from './demoStore';
+import { DemoRepository, resetDemoDatabase } from '../../tests/fixtures/demoStore';
 import { addDaysISO, todayISO } from './dates';
 import { processDueRecurringExpenses } from './repository';
 
@@ -279,6 +279,7 @@ describe('Flusso end-to-end repository (gruppi, inviti, spese, cambi, rimborsi, 
     );
     const check3 = getGroupTransferTargets({
       sourceGroupId: londra.group.id,
+      sourceMembers: londra.members,
       transfers: londraTransfers,
       allGroups,
       nameOf,
@@ -345,6 +346,7 @@ describe('Flusso end-to-end repository (gruppi, inviti, spese, cambi, rimborsi, 
     expect(remainingTransfers).toHaveLength(1);
     const checkAfter = getGroupTransferTargets({
       sourceGroupId: londra.group.id,
+      sourceMembers: londra.members,
       transfers: remainingTransfers,
       allGroups,
       nameOf,

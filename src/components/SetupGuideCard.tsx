@@ -41,10 +41,10 @@ export function SetupGuideCard({ onRetry, retrying }: SetupGuideCardProps) {
         </span>
         <div>
           <h2 style={{ fontSize: 17, fontWeight: 650 }}>
-            Inizializza le tabelle di Conti Insieme su Supabase
+            Aggiorna BauSplit su Supabase
           </h2>
           <p className="field-hint">
-            Operazione da fare una sola volta (richiede circa 30 secondi).
+            Per chi gestisce il sito: usa il progetto esistente, senza cancellare i tuoi gruppi.
           </p>
         </div>
       </div>
@@ -71,14 +71,14 @@ export function SetupGuideCard({ onRetry, retrying }: SetupGuideCardProps) {
           </a>
           , incolla lo script e premi <strong>Run</strong>.
         </li>
+        <li>In <strong>Authentication → Sign In / Providers</strong> attiva <strong>Allow anonymous sign-ins</strong> per gli ospiti. Per gli account abilita <strong>Email</strong> e <strong>Confirm email</strong>, poi salva.</li>
         <li>
           In{' '}
           <a href={authUrlsConfig} target="_blank" rel="noreferrer">
             Authentication → URL Configuration <ExternalLink size={13} />
           </a>
           , imposta come <strong>Site URL</strong> l&apos;indirizzo del sito (es.{' '}
-          <code>{getAppBaseUrl()}</code>) e aggiungilo anche in <strong>Redirect URLs</strong> così i
-          link di verifica email e recupero password riporteranno qui.
+          <code>{getAppBaseUrl()}</code>) e in <strong>Redirect URLs</strong> aggiungi sia quell’indirizzo sia <code>{getAppBaseUrl()}**</code>. Così verifica email, recupero password e inviti riporteranno qui.
         </li>
       </ol>
 

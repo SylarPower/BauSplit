@@ -1,20 +1,32 @@
 {
-  "name": "Conti Insieme",
-  "short_name": "Conti Insieme",
-  "description": "Gestione spese condivise semplice, chiara e multi-valuta",
+  "name": "BauSplit",
+  "short_name": "BauSplit",
+  "description": "BauSplit — Spese di gruppo, con o senza account",
   "lang": "it",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#F7F7F5",
-  "theme_color": "#F7F7F5",
+  "background_color": "#F8F8F2",
+  "theme_color": "#F8F8F2",
   "orientation": "portrait-primary",
   "icons": [
     {
       "src": "./icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

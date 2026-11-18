@@ -1,8 +1,8 @@
 {
-  "name": "conti-insieme",
+  "name": "bausplit",
   "private": true,
   "version": "1.0.0",
-  "description": "Conti Insieme — Gestione spese condivise minimal e multi-valuta",
+  "description": "BauSplit — Gestione spese condivise minimal e multi-valuta",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
@@ -17,6 +17,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",

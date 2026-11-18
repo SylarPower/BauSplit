@@ -13,7 +13,7 @@ interface AuthViewProps {
   initialMode?: AuthMode;
   pendingInviteToken: string | null;
   onPasswordResetDone: () => void;
-  onStartDemo: () => void;
+  onBack: () => void;
   authNotice?: string | null;
   initialError?: string | null;
 }
@@ -22,7 +22,7 @@ export function AuthView({
   initialMode = 'login',
   pendingInviteToken,
   onPasswordResetDone,
-  onStartDemo,
+  onBack,
   authNotice,
   initialError,
 }: AuthViewProps) {
@@ -234,9 +234,9 @@ export function AuthView({
       <div className="auth-wrap">
         <div className="auth-header">
           <AppLogo size={42} />
-          <h1 className="auth-title">Conti Insieme</h1>
+          <h1 className="auth-title">{mode === 'reset_password' || mode === 'forgot' ? 'La tua password' : 'Il tuo account BauSplit'}</h1>
           <p className="auth-subtitle">
-            Spese condivise, saldi semplificati e rimborsi in ordine, senza complicazioni.
+            Ritrova i tuoi gruppi anche su un altro dispositivo.
           </p>
         </div>
 
@@ -244,8 +244,7 @@ export function AuthView({
           <div className="alert alert-info">
             <Link2 size={17} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              Hai aperto un link d&apos;invito a un gruppo. Accedi o crea il tuo account per
-              visualizzarlo e decidere se accettarlo.
+              Il tuo invito ti aspetta: dopo l’accesso potrai scegliere il tuo nome e decidere se entrare.
             </span>
           </div>
         )}
@@ -312,9 +311,9 @@ export function AuthView({
                 />
               </label>
 
-              <label className="field">
+              <div className="field">
                 <span className="field-label">
-                  <span>Password</span>
+                  <label htmlFor="login-password">Password</label>
                   <button
                     type="button"
                     className="link-btn"
@@ -325,7 +324,7 @@ export function AuthView({
                   </button>
                 </span>
                 <div style={{ position: 'relative' }}>
-                  <input
+                  <input id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     className="input"
                     style={{ paddingRight: 40 }}
@@ -352,7 +351,7 @@ export function AuthView({
                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-              </label>
+              </div>
 
               <button type="submit" className="btn btn-primary btn-lg btn-full" disabled={busy}>
                 {busy ? 'Accesso in corso…' : 'Accedi'}
@@ -560,12 +559,7 @@ export function AuthView({
         </div>
 
         {mode !== 'reset_password' && (
-          <div className="auth-footer">
-            <span>Vuoi provare subito tutte le funzioni senza account?</span>
-            <button type="button" className="link-btn" onClick={onStartDemo}>
-              Apri l&apos;anteprima interattiva con dati di esempio
-            </button>
-          </div>
+          <button type="button" className="link-btn" onClick={onBack}>← Indietro</button>
         )}
       </div>
     </main>

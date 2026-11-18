@@ -17,8 +17,8 @@ import type {
   SettlementInput,
   SimplifiedTransfer,
   UserProfile,
-} from '../types';
-import { computeMemberBalances, convertToBaseAmount } from './accounting';
+} from '../../src/types';
+import { computeMemberBalances, convertToBaseAmount } from '../../src/lib/accounting';
 import {
   buildExpenseCreatedLog,
   buildExpenseDeletedLog,
@@ -27,11 +27,11 @@ import {
   buildSettlementDeletedLog,
   buildSettlementUpdatedLog,
   SPLIT_MODE_LABELS,
-} from './audit';
-import { formatMoney } from './currencies';
-import { addDaysISO, addMonthsClampedISO, formatFullDateIT, todayISO } from './dates';
-import { FREQUENCY_LABELS } from './recurring';
-import { buildCounterpartHint, type DataRepository } from './repository';
+} from '../../src/lib/audit';
+import { formatMoney } from '../../src/lib/currencies';
+import { addDaysISO, addMonthsClampedISO, formatFullDateIT, todayISO } from '../../src/lib/dates';
+import { FREQUENCY_LABELS } from '../../src/lib/recurring';
+import { buildCounterpartHint } from '../../src/lib/repository';
 
 interface DemoDatabase {
   users: UserProfile[];
@@ -67,7 +67,7 @@ export const DEMO_USERS: UserProfile[] = [
 
 export const DEMO_SAMPLE_INVITE_TOKEN = 'demo-invito-vacanza-giappone-2027';
 
-const DEMO_STORAGE_KEY = 'conti_insieme_demo_state_v1';
+const DEMO_STORAGE_KEY = 'bausplit_demo_state_v1';
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -168,15 +168,15 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gCasa]: [
         {
           userId: 'demo-marco',
+          ownerId: 'demo-marco',
           displayName: 'Marco',
-          email: 'marco@esempio.it',
           joinedAt: '2026-09-01T09:15:00Z',
           leftAt: null,
         },
         {
           userId: 'demo-giulia',
+          ownerId: 'demo-giulia',
           displayName: 'Giulia',
-          email: 'giulia@esempio.it',
           joinedAt: '2026-09-01T09:22:00Z',
           leftAt: null,
         },
@@ -184,15 +184,15 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gCinqueTerre]: [
         {
           userId: 'demo-marco',
+          ownerId: 'demo-marco',
           displayName: 'Marco',
-          email: 'marco@esempio.it',
           joinedAt: '2026-10-24T10:05:00Z',
           leftAt: null,
         },
         {
           userId: 'demo-giulia',
+          ownerId: 'demo-giulia',
           displayName: 'Giulia',
-          email: 'giulia@esempio.it',
           joinedAt: '2026-10-24T10:00:00Z',
           leftAt: null,
         },
@@ -200,22 +200,22 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gLondra]: [
         {
           userId: 'demo-marco',
+          ownerId: 'demo-marco',
           displayName: 'Marco',
-          email: 'marco@esempio.it',
           joinedAt: '2026-10-10T18:12:00Z',
           leftAt: null,
         },
         {
           userId: 'demo-giulia',
+          ownerId: 'demo-giulia',
           displayName: 'Giulia',
-          email: 'giulia@esempio.it',
           joinedAt: '2026-10-10T18:00:00Z',
           leftAt: null,
         },
         {
           userId: 'demo-luca',
+          ownerId: 'demo-luca',
           displayName: 'Luca',
-          email: 'luca@esempio.it',
           joinedAt: '2026-10-11T10:05:00Z',
           leftAt: null,
         },
@@ -223,15 +223,15 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gGiappone]: [
         {
           userId: 'demo-giulia',
+          ownerId: 'demo-giulia',
           displayName: 'Giulia',
-          email: 'giulia@esempio.it',
           joinedAt: '2026-11-10T12:00:00Z',
           leftAt: null,
         },
         {
           userId: 'demo-luca',
+          ownerId: 'demo-luca',
           displayName: 'Luca',
-          email: 'luca@esempio.it',
           joinedAt: '2026-11-10T12:30:00Z',
           leftAt: null,
         },
@@ -762,7 +762,7 @@ export function resetDemoDatabase(): void {
   saveDb(buildInitialDemoDatabase());
 }
 
-export class DemoRepository implements DataRepository {
+export class DemoRepository {
   readonly isDemo = true;
   private getCurrentUserId: () => string;
 
@@ -884,8 +884,8 @@ export class DemoRepository implements DataRepository {
     db.members[group.id] = [
       {
         userId: user.id,
+        ownerId: user.id,
         displayName: user.displayName,
-        email: user.email,
         joinedAt: now,
         leftAt: null,
       },
@@ -1216,8 +1216,8 @@ export class DemoRepository implements DataRepository {
     } else {
       list.push({
         userId: user.id,
+        ownerId: user.id,
         displayName: user.displayName,
-        email: user.email,
         joinedAt: now,
         leftAt: null,
       });

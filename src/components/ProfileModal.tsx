@@ -9,9 +9,10 @@ interface ProfileModalProps {
   open: boolean;
   onClose: () => void;
   profile: UserProfile;
-  isDemo: boolean;
+  isGuest: boolean;
   onUpdateName: (newName: string) => Promise<void>;
   onSignOut: () => void;
+  onOpenAccount: () => void;
   onToast: (msg: string, isError?: boolean) => void;
 }
 
@@ -19,9 +20,10 @@ export function ProfileModal({
   open,
   onClose,
   profile,
-  isDemo,
+  isGuest,
   onUpdateName,
   onSignOut,
+  onOpenAccount,
   onToast,
 }: ProfileModalProps) {
   const [name, setName] = useState(profile.displayName);
@@ -86,15 +88,16 @@ export function ProfileModal({
   return (
     <Modal
       open={open}
-      title="Il tuo account"
+      title={isGuest ? 'Il tuo profilo su questo dispositivo' : 'Il tuo account'}
       onClose={onClose}
       footerBetween
       footer={
         <>
-          <button type="button" className="btn btn-danger" onClick={onSignOut}>
-            <LogOut size={15} />
-            {isDemo ? 'Esci dalla demo' : 'Esci'}
-          </button>
+          {isGuest ? (
+            <button type="button" className="btn btn-primary" onClick={onOpenAccount}>Accedi o crea account</button>
+          ) : (
+            <button type="button" className="btn btn-danger" onClick={onSignOut}><LogOut size={15} /> Esci</button>
+          )}
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Chiudi
           </button>
@@ -113,14 +116,15 @@ export function ProfileModal({
               className="text-secondary"
               style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis' }}
             >
-              {profile.email}
+              {isGuest ? 'Senza account' : profile.email}
             </div>
           </div>
         </div>
 
+        {isGuest && <p className="field-hint">Questo browser ricorda i tuoi gruppi. Collegali a un account prima di cambiare dispositivo o cancellare i dati del sito.</p>}
         <form className="form-stack" onSubmit={handleSaveName}>
           <label className="field">
-            <span className="field-label">Nome visualizzato nei gruppi</span>
+            <span className="field-label">Il tuo nome predefinito</span>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 type="text"
@@ -141,7 +145,7 @@ export function ProfileModal({
           </label>
         </form>
 
-        {!isDemo && (
+        {!isGuest && (
           <>
             <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
             <form className="form-stack" onSubmit={handleChangePassword}>

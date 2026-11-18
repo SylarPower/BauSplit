@@ -154,7 +154,7 @@ export function downloadCsvFile(csvContent: string, groupName: string): void {
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'gruppo';
-  const filename = `conti-insieme-${safeSlug}-${todayISO()}.csv`;
+  const filename = `bausplit-${safeSlug}-${todayISO()}.csv`;
 
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
