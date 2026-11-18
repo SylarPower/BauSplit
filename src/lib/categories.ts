@@ -26,20 +26,22 @@ export const CUSTOM_CATEGORY_ICONS: { id: string; label: string }[] = [
   { id: 'film', label: 'Cinema e serie' },
 ];
 
-export const CUSTOM_CATEGORY_COLORS: string[] = [
-  '#0F766E',
-  '#0369A1',
-  '#1D4ED8',
-  '#4338CA',
-  '#7E22CE',
-  '#BE185D',
-  '#C2410C',
-  '#B45309',
-  '#047857',
-  '#475569',
-  '#B91C1C',
-  '#78716C',
+// Dieci famiglie cromatiche della palette categoriale Tableau 10, con tonalità
+// presenti nel DEFAULT_COLOR_SET di Actual Budget. Sono suggerimenti, non un vincolo sui dati.
+export const CATEGORY_COLOR_PRESETS: readonly { label: string; hex: string }[] = [
+  { label: 'Verde acqua', hex: '#00796B' },
+  { label: 'Blu', hex: '#1976D2' },
+  { label: 'Viola', hex: '#7B1FA2' },
+  { label: 'Rosa', hex: '#C2185B' },
+  { label: 'Rosso', hex: '#D32F2F' },
+  { label: 'Arancione', hex: '#F57C00' },
+  { label: 'Giallo', hex: '#FBC02D' },
+  { label: 'Verde', hex: '#388E3C' },
+  { label: 'Marrone', hex: '#5D4037' },
+  { label: 'Grigio', hex: '#616161' },
 ];
+
+export const DEFAULT_CATEGORY_COLOR = CATEGORY_COLOR_PRESETS[0].hex;
 
 type Classified = { category: string; categoryLabel: string };
 

@@ -16,6 +16,7 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 - Usare più valute. Se il gruppo è in euro e paghi in yen, premi **Inverti cambio** per scrivere **1 EUR = 160 JPY**: una spesa da 1.600 ¥ vale 10 €. Il pulsante cambia solo il modo di leggere o scrivere il tasso, non la valuta, l’importo o il cambio salvato. Lo trovi anche nei rimborsi, nelle ricorrenze e quando sposti un saldo tra gruppi con valute diverse. Nelle ricorrenze lascia vuoto il cambio fisso per usare quello automatico alla scadenza. La valuta in cui leggi i saldi si sceglie separatamente.
 - I nuovi gruppi partono con 11 categorie, in quest’ordine: **Spesa, Ristoranti e bar, Casa, Trasporti, Viaggi, Svago, Shopping, Salute, Abbonamenti, Regali, Altro**. I nomi scelti dal gruppo hanno la precedenza. «Bollette e utenze» non è più predefinita: le spese e le ricorrenze che la usavano restano nella loro categoria, senza essere spostate in «Casa».
 - Da **Impostazioni del gruppo → Categorie del gruppo**, apri l’elenco e premi la matita per cambiare nome, icona o colore di qualsiasi categoria, anche predefinita. Usa le frecce per riordinarle. Il nuovo nome compare anche sulle **vecchie spese**, nelle ricerche, nei filtri, nelle ricorrenze, negli **Insights** e nel **CSV** di quel gruppo. Nello storico rimangono sia il nome di allora sia la successiva rinomina.
+- Per il colore hai le stesse scelte nelle impostazioni e da **Nuova spesa → Categoria → Nuova**: 10 colori pronti (verde acqua, blu, viola, rosa, rosso, arancione, giallo, verde, marrone e grigio) oppure **Colore personalizzato** per scegliere qualsiasi tonalità. I colori già salvati restano come sono, anche se non sono tra i dieci.
 - Se una categoria non ti serve più, scegli **Nascondi dalle nuove spese**: potrai renderla visibile di nuovo, senza perdere movimenti né interrompere le ricorrenze. Puoi eliminare una categoria personalizzata se nessuna spesa o ricorrenza la usa. Almeno una categoria deve restare visibile. I rimborsi restano esclusi dai totali di spesa degli Insights.
 - Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. L’ultimo partecipante viene avvisato prima di eliminare il gruppo.
 - Chiudere e riaprire un gruppo. Puoi lasciarvi i saldi oppure spostarli in un altro gruppo attivo dove sono presenti **tutte le persone coinvolte**, anche con una valuta diversa. Conta la persona che ha scelto il posto in entrambi i gruppi, non la semplice coincidenza fra due nomi. I gruppi chiusi rimangono consultabili ed esportabili.
@@ -23,6 +24,8 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 ## Mettere BauSplit online, passo per passo
 
 ### 1. Aggiorna il tuo progetto Supabase
+
+**Se usi già la versione con le 11 categorie modificabili**, il nuovo selettore colori non richiede aggiornamenti su Supabase: passa al punto 3.
 
 1. Apri il progetto che contiene già le tue spese (`mwicplgacecjaeyzbuhx`, se usi quello impostato nell’app). **Non creare un nuovo progetto e non cancellare tabelle.** Se contiene dati importanti, fai prima una copia di sicurezza.
 2. In questa versione del repository apri [**supabase/schema.sql**](./supabase/schema.sql) e copia **tutto** il contenuto del file.
@@ -54,5 +57,7 @@ npm run dev      # sviluppo locale
 npm test         # contabilità, ricorrenze, cambi, CSV, inviti, accessi e collegamento dei gruppi
 npm run build    # aggiorna docs/ (compreso .nojekyll); includila nella pubblicazione
 ```
+
+I dieci suggerimenti in [src/lib/categories.ts](./src/lib/categories.ts) riprendono le famiglie cromatiche di [Tableau 10](https://github.com/d3/d3-scale-chromatic/blob/5bcfc81318aba0fd760b33f8ad44bb068a074239/src/categorical/Tableau10.js) in tonalità presenti nel [selettore colori di Actual Budget](https://github.com/actualbudget/actual/blob/d05bd031fa6d6be2b60f9d47ca45c1dad9f27acf/packages/component-library/src/ColorPicker.tsx). Sono scelte per distinguere categorie, non nuovi colori assegnati ai gruppi.
 
 I test dello schema usano PostgreSQL locale in memoria (PGlite), non il progetto online. Per usare un altro progetto imposta `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` in `.env.local` prima della compilazione: usa **solo la chiave pubblica**. L’accesso ai gruppi è controllato su Supabase, mai dall’elenco salvato nel browser. Gli accessi ospite e account restano separati finché entrambi autorizzano il collegamento; le spese fanno riferimento a posti stabili nel gruppo, non alle credenziali.
