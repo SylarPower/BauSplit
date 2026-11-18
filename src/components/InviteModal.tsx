@@ -42,8 +42,8 @@ export function InviteModal({
   const handleShare = async () => {
     try {
       await navigator.share({
-        title: `Invito al gruppo "${group.name}" — Conti Insieme`,
-        text: `Unisciti al gruppo "${group.name}" su Conti Insieme:`,
+        title: `Invito al gruppo "${group.name}" — BauSplit`,
+        text: `Unisciti al gruppo "${group.name}" su BauSplit:`,
         url: inviteUrl,
       });
     } catch {
@@ -94,8 +94,7 @@ export function InviteModal({
       <div className="form-stack">
         <p className="text-secondary" style={{ fontSize: 14 }}>
           Invia questo link alla persona che vuoi aggiungere (ad esempio su WhatsApp o Telegram).
-          Chi lo apre dovrà accedere e <strong>accettare esplicitamente</strong> prima di entrare nel
-          gruppo.
+          Chi lo apre può proseguire senza account: sceglie il proprio nome e deve <strong>accettare l’invito</strong> prima di vedere le spese. Condividilo solo con le persone del gruppo.
         </p>
 
         {group.inviteEnabled ? (

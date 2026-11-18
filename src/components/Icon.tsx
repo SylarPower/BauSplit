@@ -137,19 +137,5 @@ export function Avatar({
 }
 
 export function AppLogo({ size = 28 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 192 192"
-      fill="none"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      <rect width="192" height="192" rx="46" fill="#0F766E" />
-      <circle cx="78" cy="96" r="38" fill="#FFFFFF" fillOpacity="0.96" />
-      <circle cx="114" cy="96" r="38" fill="#99F6E4" fillOpacity="0.72" />
-      <circle cx="114" cy="96" r="38" stroke="#FFFFFF" strokeWidth="6" />
-    </svg>
-  );
+  return <img src="./icon.svg" alt="" width={size} height={size} style={{ flexShrink: 0 }} />;
 }

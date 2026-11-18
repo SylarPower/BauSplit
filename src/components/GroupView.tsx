@@ -59,7 +59,8 @@ interface GroupViewProps {
   repo: DataRepository;
   data: GroupData;
   allGroups: GroupOverview[];
-  currentUserId: string;
+  actorId: string;
+  currentUserId: string; // posto del partecipante in questo gruppo
   onBack: () => void;
   onNavigateGroup: (groupId: string) => void;
   onRefreshGroup: () => Promise<void>;
@@ -67,12 +68,13 @@ interface GroupViewProps {
   onToast: (msg: string, isError?: boolean) => void;
 }
 
-const DISPLAY_CURRENCY_PREFIX = 'conti_insieme_display_currency_';
+const DISPLAY_CURRENCY_PREFIX = 'bausplit_display_currency_';
 
 export function GroupView({
   repo,
   data,
   allGroups,
+  actorId,
   currentUserId,
   onBack,
   onNavigateGroup,
@@ -211,7 +213,7 @@ export function GroupView({
   }) => {
     const recId = await repo.saveRecurring({
       input: params.recurring,
-      actorId: currentUserId,
+      actorId,
       baseCurrency: group.baseCurrency,
       nameOf,
     });
@@ -248,7 +250,7 @@ export function GroupView({
   const handleSaveSettlement = async (input: SettlementInput, before?: Settlement) => {
     await repo.saveSettlement({
       input,
-      actorId: currentUserId,
+      actorId,
       baseCurrency: group.baseCurrency,
       before,
       nameOf,
@@ -260,7 +262,7 @@ export function GroupView({
   const handleDeleteSettlement = async (st: Settlement) => {
     await repo.deleteSettlement({
       settlement: st,
-      actorId: currentUserId,
+      actorId,
       baseCurrency: group.baseCurrency,
       nameOf,
     });
@@ -271,13 +273,13 @@ export function GroupView({
   const handleSaveRecurring = async (input: RecurringExpenseInput, before?: RecurringExpense) => {
     await repo.saveRecurring({
       input,
-      actorId: currentUserId,
+      actorId,
       baseCurrency: group.baseCurrency,
       before,
       nameOf,
     });
     const fresh = await repo.getGroupData(group.id);
-    await processDueRecurringExpenses({ repo, actorId: currentUserId, data: fresh });
+    await processDueRecurringExpenses({ repo, actorId, data: fresh });
     await onRefreshGroup();
     onToast(before ? 'Ricorrenza aggiornata' : 'Spesa ricorrente creata');
   };
@@ -298,7 +300,7 @@ export function GroupView({
       recurring: rec,
       active,
       nextDueDate: nextDue,
-      actorId: currentUserId,
+      actorId,
     });
     await onRefreshGroup();
     onToast(active ? 'Ricorrenza riattivata' : 'Ricorrenza messa in pausa');
@@ -307,7 +309,7 @@ export function GroupView({
   const handleRunRecurringNow = async (rec: RecurringExpense) => {
     const count = await processDueRecurringExpenses({
       repo,
-      actorId: currentUserId,
+      actorId,
       data,
       onlyRecurringId: rec.id,
       forceSingleOccurrence: true,
@@ -321,7 +323,7 @@ export function GroupView({
   };
 
   const handleDeleteRecurring = async (rec: RecurringExpense) => {
-    await repo.deleteRecurring({ recurring: rec, actorId: currentUserId });
+    await repo.deleteRecurring({ recurring: rec, actorId });
     await onRefreshGroup();
     onToast('Spesa ricorrente rimossa');
   };
@@ -333,7 +335,7 @@ export function GroupView({
   }): Promise<CustomCategory> => {
     const created = await repo.addCustomCategory({
       groupId: group.id,
-      actorId: currentUserId,
+      actorId,
       ...params,
     });
     await onRefreshGroup();
@@ -341,14 +343,14 @@ export function GroupView({
   };
 
   const handleDeleteCategory = async (cat: CustomCategory) => {
-    await repo.deleteCustomCategory({ category: cat, actorId: currentUserId });
+    await repo.deleteCustomCategory({ category: cat, actorId });
     await onRefreshGroup();
   };
 
   const handleUpdateGroup = async (name: string, description: string) => {
     await repo.updateGroup({
       groupId: group.id,
-      actorId: currentUserId,
+      actorId,
       beforeName: group.name,
       beforeDescription: group.description,
       name,
@@ -370,7 +372,7 @@ export function GroupView({
       exchangeRate: params.exchangeRate,
       rateDate: params.rateDate,
       rateIsManual: params.rateIsManual,
-      actorId: currentUserId,
+      actorId,
       nameOf,
     });
     await onRefreshGroup();
@@ -382,7 +384,7 @@ export function GroupView({
   };
 
   const handleReopenGroup = async () => {
-    await repo.reopenGroup(group.id, currentUserId);
+    await repo.reopenGroup(group.id, actorId);
     await onRefreshGroup();
     onToast('Gruppo riaperto');
   };
@@ -791,7 +793,7 @@ export function GroupView({
           />
         )}
 
-        {tab === 'history' && <HistoryTab logs={activityLogs} members={members} />}
+        {tab === 'history' && <HistoryTab logs={activityLogs} />}
       </div>
 
       {/* Bottone mobile rapido "+ Spesa" */}
@@ -886,6 +888,10 @@ export function GroupView({
         customCategories={customCategories}
         currentUserId={currentUserId}
         onUpdateGroup={handleUpdateGroup}
+        onAddParticipant={async (name) => {
+          await repo.addParticipant(group.id, name);
+          await onRefreshGroup();
+        }}
         onAddCategory={handleAddCategory}
         onDeleteCategory={handleDeleteCategory}
         onCloseGroup={handleCloseGroup}

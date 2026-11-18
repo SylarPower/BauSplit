@@ -1,50 +1,54 @@
-# Conti Insieme
+# BauSplit
 
-Web app responsive e PWA minimal in italiano per gestire **spese condivise**, **saldi semplificati** e **rimborsi** in stile Splitwise/Tricount, collegata a **Supabase** (Auth + PostgreSQL con Row Level Security + Realtime) e pronta per **GitHub Pages**.
+Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul computer e si può aggiungere alla schermata Home. Indirizzo di pubblicazione: **https://sylarpower.github.io/BauSplit/**.
 
-## Funzionalità principali
+## Usare BauSplit
 
-- **Account con email e password**: registrazione con verifica dell'indirizzo email (con reinvio del link), accesso, recupero/reimpostazione password e modifica del nome visualizzato. Nessuna email promozionale o notifica di attività.
-- **Gruppi privati con invito tramite link**: link riutilizzabile, rigenerabile e disattivabile da qualsiasi membro. Chi apre il link visualizza prima l'anteprima e deve accettare esplicitamente per entrare. Qualsiasi membro può uscire dal gruppo in ogni momento, anche con saldo diverso da zero (il saldo aperto resta visibile e saldabile).
-- **Chiusura gruppo e spostamento del saldo rimanente**: alla fine di un viaggio o di un progetto puoi chiudere il gruppo e spostare automaticamente il saldo residuo in un altro gruppo attivo che contenga tutti gli utenti coinvolti in quel saldo (con conversione valutaria automatica o manuale se le valute base sono diverse, senza alterare gli Insights di spesa). I gruppi chiusi restano consultabili, esportabili in CSV e riapribili.
-- **Spese e ripartizioni al centesimo**: un pagante per spesa, partecipanti selezionabili e divisione in **parti uguali**, **per importi esatti** o **per percentuali**, con nota opzionale.
-- **Spese ricorrenti**: programmazione automatica (settimanale, bisettimanale, mensile, bimestrale, trimestrale, annuale) con pausa/riattivazione, modifica e registrazione immediata.
-- **Multi-valuta**: valuta di riferimento per gruppo (`EUR` predefinita), recupero automatico del tasso BCE alla data della spesa, modifica manuale e salvataggio permanente senza aggiornamenti retroattivi. Selettore dedicato per **visualizzare i saldi** in un'altra valuta senza modificare la contabilità del gruppo.
-- **Saldi semplificati e rimborsi**: calcolo automatico del numero minimo di pagamenti per tornare in pari; i rimborsi registrati aggiornano subito i saldi senza conferma del destinatario.
-- **Categorie, ricerca, filtri ed esportazione CSV**: 12 categorie predefinite + categorie personalizzabili per gruppo, filtri combinabili ed esportazione CSV compatibile con Excel, Numbers e Google Fogli.
-- **Insights**: riepilogo dell'intero gruppo o di un intervallo di date con totale, numero di spese, spesa media, ripartizione per categoria, per chi ha anticipato il denaro, quota effettiva per persona e andamento mensile (rimborsi esclusi dai totali).
-- **Storico modifiche**: registro completo e non modificabile di chi ha fatto cosa e quando, con differenze prima/dopo sulle modifiche e riepilogo degli elementi eliminati.
+- **Senza account:** premi **Inizia senza account**, scrivi come ti chiami e crea un gruppo. Puoi aggiungere i nomi degli altri subito, uno per riga, o più tardi nelle impostazioni del gruppo. Puoi già assegnare loro spese e quote, senza conoscere la loro email.
+- **Condividere:** premi **Invita** e manda il link solo alle persone del gruppo. Chi lo apre vede prima un riepilogo, sceglie un nome libero oppure ne scrive uno nuovo, poi preme **Accetta ed entra nel gruppo**. Scegliendo un nome esistente ritrova le quote già registrate per quella persona. Aprire o rifiutare un invito non dà accesso alle spese. I membri possono disattivare o sostituire il link.
+- **Ritrovare i gruppi:** le spese sono condivise su Supabase, non conservate soltanto sul telefono. Il browser ricorda l’accesso ospite e l’elenco dei gruppi; per vedere o modificare i conti serve Internet. Senza un account, **non cancellare i dati del sito e non usare una finestra privata** se vuoi conservare il tuo accesso.
+- **Con un account facoltativo:** ospiti e persone con email e password possono stare nello stesso gruppo. Da **I tuoi gruppi → Collega un account** puoi accedere o registrarti. Conferma l’email e accedi **nello stesso browser usato come ospite**: i gruppi vengono collegati automaticamente, anche quelli chiusi. Da allora li ritrovi anche su altri dispositivi. Se apri l’email su un altro telefono, basta poi accedere sul primo. Non occorre accettare di nuovo gli inviti.
+- **Se eri già nello stesso gruppo con due nomi:** resta attivo il posto che avevi con l’account; le quote del precedente nome ospite restano visibili e saldabili, non vengono cancellate o sommate di nascosto. Il collegamento non ti fa rientrare nei gruppi che hai lasciato.
 
-## Configurazione iniziale (una tantum)
+## Cosa puoi fare nei gruppi
 
-### 1. Database e RLS su Supabase
+- Dividere una spesa in **parti uguali, importi esatti o percentuali**, scegliendo pagante e partecipanti. Programmare spese ricorrenti, metterle in pausa o registrarle subito; le scadenze maturate vengono registrate all’apertura del gruppo.
+- Usare più valute: il **cambio della spesa resta salvato**. Puoi inserire un cambio manuale e scegliere separatamente la valuta in cui leggere i saldi, senza cambiare i conti.
+- Aggiungere categorie personalizzate, cercare e filtrare le spese, esportare il **CSV**, consultare **Insights** e **storico modifiche**. I rimborsi non gonfiano le statistiche di spesa.
+- Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. L’ultimo partecipante viene avvisato prima di eliminare il gruppo.
+- Chiudere e riaprire un gruppo. Puoi lasciarvi i saldi oppure spostarli in un altro gruppo attivo dove sono presenti **tutte le persone coinvolte**, anche con una valuta diversa. Conta la persona che ha scelto il posto in entrambi i gruppi, non la semplice coincidenza fra due nomi. I gruppi chiusi rimangono consultabili ed esportabili.
 
-1. Apri il **SQL Editor** del progetto Supabase (`mwicplgacecjaeyzbuhx`).
-2. Copia e incolla l'intero contenuto di [`supabase/schema.sql`](./supabase/schema.sql) e premi **Run**.
-   *(Se accedi all'app prima di farlo, Conti Insieme mostra automaticamente una guida con il pulsante **Copia script SQL**.)*
+## Mettere BauSplit online, passo per passo
 
-### 2. URL di verifica email e recupero password su Supabase
+### 1. Aggiorna il tuo progetto Supabase
 
-1. In Supabase vai su **Authentication → URL Configuration**.
-2. Imposta **Site URL** su `https://sylarpower.github.io/todolist/`.
-3. In **Redirect URLs** aggiungi `https://sylarpower.github.io/todolist/**`.
-4. Assicurati che in **Authentication → Providers → Email** sia attiva l'opzione **Confirm email**.
+1. Apri il progetto che contiene già le tue spese (`mwicplgacecjaeyzbuhx`, se usi quello impostato nell’app). **Non creare un nuovo progetto e non cancellare tabelle.** Se contiene dati importanti, fai prima una copia di sicurezza.
+2. In questa versione del repository apri [**supabase/schema.sql**](./supabase/schema.sql) e copia **tutto** il contenuto del file.
+3. Nel progetto Supabase apri [**SQL Editor → New query**](https://supabase.com/dashboard/project/mwicplgacecjaeyzbuhx/sql/new), incolla il testo e premi **Run**. Aspetta la conferma di successo prima di proseguire. Questo aggiorna i gruppi esistenti senza ricreare conti, quote e cambi; puoi eseguirlo anche su un progetto vuoto. Se l’app rileva che manca l’aggiornamento, offre lo stesso file con **Copia script SQL**.
 
-### 3. Pubblicazione su GitHub Pages
+### 2. Permetti entrambi i modi di entrare
 
-La versione pronta per la pubblicazione viene compilata nella cartella [`docs/`](./docs) (incluso `.nojekyll`):
-1. Nelle impostazioni del repository GitHub vai su **Settings → Pages**.
-2. In **Build and deployment → Source** lascia **Deploy from a branch**.
-3. Sotto **Branch**, seleziona **`main`** e nel menu accanto seleziona **`/docs`**, poi premi **Save**.
-4. L'app è subito disponibile su `https://sylarpower.github.io/todolist/`.
+1. In **Authentication → Sign In / Providers** abilita **Allow new users to sign up** e **Allow anonymous sign-ins**. La seconda opzione è quella che permette di entrare senza email. Salva.
+2. Nella stessa sezione attiva **Email** e **Confirm email**: chi si registra deve confermare l’indirizzo. Per mandare conferme e recuperi password anche a persone esterne al tuo team, imposta il tuo servizio di posta in **Authentication → Emails → SMTP Settings**. I dati del servizio di posta vanno **solo** in Supabase, mai nei file del sito.
+3. In **Authentication → URL Configuration** imposta **Site URL** su `https://sylarpower.github.io/BauSplit/`. In **Redirect URLs** aggiungi `https://sylarpower.github.io/BauSplit/` e `https://sylarpower.github.io/BauSplit/**`. Salva. Così anche un’email aperta durante un invito riporta al posto giusto. Rispetta le maiuscole di **BauSplit**.
 
-## Sviluppo locale
+### 3. Pubblica la cartella già pronta
 
-```bash
-npm install
-npm run dev      # avvia il server di sviluppo
-npm test         # esegue i test automatici su contabilità, cambi, ricorrenze, chiusura gruppi e CSV
-npm run build    # compila la versione di produzione aggiornata in docs/
+1. Porta questa versione sul ramo principale **`main`** del repository **SylarPower/BauSplit**, includendo l’intera cartella [**docs/**](./docs). Se le modifiche sono su un ramo di lavoro, usa su GitHub **Compare & pull request → Create pull request → Merge pull request → Confirm merge** verso `main`. Per questa versione non devi compilare nulla sul tuo computer.
+2. Nel repository apri **Settings → Pages**. In **Source** scegli **Deploy from a branch**; nei due menu sotto scegli **`main`** e **`/docs`**. Premi **Save**.
+3. Attendi il messaggio **Your site is live** (può volerci qualche minuto), poi apri **https://sylarpower.github.io/BauSplit/**.
+
+### 4. Fai una prova con due dispositivi
+
+Sul primo entra senza account, crea un gruppo con un secondo nome e registra una spesa condivisa. Manda l’invito al secondo dispositivo: prima di accettare non deve mostrare le spese. Scegli il secondo nome, accetta e controlla che la spesa sia già lì. Registra un rimborso e controlla i saldi su entrambi. Infine, sul primo dispositivo scegli **Collega un account**, conferma l’email e verifica che il gruppo compaia una sola volta anche dopo un nuovo accesso. Puoi provare **Password dimenticata?** dalla schermata **Accedi**.
+
+## Per chi modifica il codice
+
+```sh
+npm ci
+npm run dev      # sviluppo locale
+npm test         # contabilità, ricorrenze, cambi, CSV, inviti, accessi e collegamento dei gruppi
+npm run build    # aggiorna docs/ (compreso .nojekyll); includila nella pubblicazione
 ```
 
-Per usare un progetto Supabase diverso è sufficiente creare un file `.env.local` con `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`.
+I test dello schema usano PostgreSQL locale in memoria (PGlite), non il progetto online. Per usare un altro progetto imposta `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` in `.env.local` prima della compilazione: usa **solo la chiave pubblica**. L’accesso ai gruppi è controllato su Supabase, mai dall’elenco salvato nel browser. Gli accessi ospite e account restano separati finché entrambi autorizzano il collegamento; le spese fanno riferimento a posti stabili nel gruppo, non alle credenziali.

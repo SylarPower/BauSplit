@@ -47,6 +47,7 @@ interface GroupSettingsModalProps {
   customCategories: CustomCategory[];
   currentUserId: string;
   onUpdateGroup: (name: string, description: string) => Promise<void>;
+  onAddParticipant: (name: string) => Promise<void>;
   onAddCategory: (params: {
     name: string;
     icon: string;
@@ -76,6 +77,7 @@ export function GroupSettingsModal({
   customCategories,
   currentUserId,
   onUpdateGroup,
+  onAddParticipant,
   onAddCategory,
   onDeleteCategory,
   onCloseGroup,
@@ -89,6 +91,8 @@ export function GroupSettingsModal({
   const [description, setDescription] = useState(group.description);
   const [savingGroup, setSavingGroup] = useState(false);
 
+  const [newMember, setNewMember] = useState('');
+  const [addingMember, setAddingMember] = useState(false);
   const [catName, setCatName] = useState('');
   const [catIcon, setCatIcon] = useState('tag');
   const [catColor, setCatColor] = useState(CUSTOM_CATEGORY_COLORS[0]);
@@ -118,6 +122,7 @@ export function GroupSettingsModal({
     () =>
       getGroupTransferTargets({
         sourceGroupId: group.id,
+        sourceMembers: members,
         transfers,
         allGroups,
         nameOf,
@@ -552,7 +557,7 @@ export function GroupSettingsModal({
                         </span>
                       )}
                       <span style={{ fontSize: 12.5 }}>
-                        Puoi creare o aprire un gruppo con queste persone, pareggiare le quote di chi
+                        Ogni persona deve aver scelto il proprio nome in entrambi i gruppi: due nomi uguali non bastano. Puoi pareggiare le quote di chi
                         non ne fa parte, oppure chiudere comunque questo gruppo senza spostare il
                         saldo.
                       </span>
@@ -666,13 +671,35 @@ export function GroupSettingsModal({
                       )}
                     </div>
                     <div className="field-hint">
-                      Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
+                      {m.ownerId === null && 'Nome da scegliere nell’invito · '}Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
                     </div>
                   </div>
                 </div>
               </div>
             ))}
           </div>
+          {!isClosed && (
+            <form className="form-stack" onSubmit={async (event) => {
+              event.preventDefault();
+              setAddingMember(true);
+              try {
+                await onAddParticipant(newMember.trim());
+                setNewMember('');
+                onToast('Partecipante aggiunto');
+              } catch (err) { onToast(translateErrorIT(err), true); }
+              finally { setAddingMember(false); }
+            }}>
+              <label className="field">
+                <span className="field-label">Aggiungi un partecipante</span>
+                <input className="input" placeholder="Nome o soprannome" maxLength={60} required
+                  value={newMember} onChange={(e) => setNewMember(e.target.value)} />
+                <span className="field-hint">Puoi già dividere le spese con questa persona. Sceglierà il suo nome quando aprirà l’invito.</span>
+              </label>
+              <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} disabled={!newMember.trim() || addingMember}>
+                <Plus size={14} /> Aggiungi nome
+              </button>
+            </form>
+          )}
         </div>
 
         {!isClosed && (
@@ -770,6 +797,11 @@ export function GroupSettingsModal({
           <div style={{ fontSize: 14, fontWeight: 650 }}>Uscita dal gruppo</div>
           {confirmLeave ? (
             <div className="alert alert-error" style={{ flexDirection: 'column', gap: 10 }}>
+              {activeMembers.length > 1 && activeMembers.every((m) => m.userId === currentUserId || !m.ownerId) && (
+                <span>Sei l’unica persona che ha aperto questo gruppo. {group.inviteEnabled && !isClosed
+                  ? 'Condividi il link prima di uscire: servirà per ritrovarlo.'
+                  : 'Senza un invito attivo nessuno potrà rientrare dopo la tua uscita.'}</span>
+              )}
               <span>
                 {activeMembers.length === 1 ? (
                   <>

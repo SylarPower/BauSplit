@@ -1,16 +1,16 @@
 import {
-  Check,
   ChevronRight,
   Link2,
   Plus,
   Users,
-  X,
+  MonitorSmartphone,
 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { CURRENCIES, formatMoney } from '../lib/currencies';
-import { DEMO_SAMPLE_INVITE_TOKEN } from '../lib/demoStore';
+import type { DeviceGroup } from '../lib/deviceGroups';
+import { AcceptInviteForm } from './AcceptInviteForm';
 import { extractInviteToken, translateErrorIT } from '../lib/supabase';
-import type { GroupOverview, InvitePreview } from '../types';
+import type { CreateGroupInput, GroupOverview, InviteChoice, InvitePreview } from '../types';
 import { Avatar } from './Icon';
 import { Modal } from './Modal';
 import { SetupGuideCard } from './SetupGuideCard';
@@ -19,23 +19,23 @@ interface GroupsHomeViewProps {
   groups: GroupOverview[];
   loading: boolean;
   schemaMissing: boolean;
-  isDemo: boolean;
-  currentUserId: string;
+  isGuest: boolean;
+  defaultName: string;
+  bookmarks: DeviceGroup[];
+  loadError: string | null;
+  onAccount: () => void;
   onRetryLoad: () => void;
   onSelectGroup: (groupId: string) => void;
-  onCreateGroup: (params: {
-    name: string;
-    description: string;
-    baseCurrency: string;
-  }) => Promise<void>;
+  onCreateGroup: (params: CreateGroupInput) => Promise<void>;
 
   pendingInvite: {
     token: string;
     loading: boolean;
     preview: InvitePreview | null;
+    error?: string;
   } | null;
   onInspectInviteToken: (token: string) => void;
-  onAcceptInvite: (token: string) => Promise<void>;
+  onAcceptInvite: (token: string, choice: InviteChoice) => Promise<void>;
   onDeclineInvite: () => void;
   onToast: (msg: string, isError?: boolean) => void;
 }
@@ -44,8 +44,11 @@ export function GroupsHomeView({
   groups,
   loading,
   schemaMissing,
-  isDemo,
-  currentUserId,
+  isGuest,
+  defaultName,
+  bookmarks,
+  loadError,
+  onAccount,
   onRetryLoad,
   onSelectGroup,
   onCreateGroup,
@@ -59,11 +62,11 @@ export function GroupsHomeView({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [baseCurrency, setBaseCurrency] = useState('EUR');
+  const [participants, setParticipants] = useState('');
   const [creating, setCreating] = useState(false);
 
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [inviteInput, setInviteInput] = useState('');
-  const [accepting, setAccepting] = useState(false);
 
   const handleCreateSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -74,7 +77,9 @@ export function GroupsHomeView({
         name: name.trim(),
         description: description.trim(),
         baseCurrency,
+        participants: participants.split('\n').map((n) => n.trim()).filter(Boolean),
       });
+      setParticipants('');
       setName('');
       setDescription('');
       setBaseCurrency('EUR');
@@ -97,23 +102,6 @@ export function GroupsHomeView({
     setShowJoinModal(false);
     onInspectInviteToken(token);
   };
-
-  const handleAccept = async (token: string) => {
-    setAccepting(true);
-    try {
-      await onAcceptInvite(token);
-    } catch (err) {
-      onToast(translateErrorIT(err), true);
-    } finally {
-      setAccepting(false);
-    }
-  };
-
-  const showDemoInviteShortcut =
-    isDemo &&
-    currentUserId === 'demo-marco' &&
-    !pendingInvite &&
-    !groups.some((g) => g.group.id === 'demo-group-giappone');
 
   const activeGroups = groups.filter((g) => g.group.closedAt === null);
   const closedGroups = groups.filter((g) => g.group.closedAt !== null);
@@ -168,6 +156,10 @@ export function GroupsHomeView({
                   <span className="spinner" />
                   <span className="text-secondary">Verifica dell&apos;invito in corso…</span>
                 </div>
+              ) : pendingInvite.error ? (
+                <div className="form-stack"><p role="alert">{pendingInvite.error}</p><div className="inline-actions">
+                  <button className="btn btn-secondary" onClick={() => onInspectInviteToken(pendingInvite.token)}>Riprova</button>
+                  <button className="btn btn-ghost" onClick={onDeclineInvite}>Chiudi</button></div></div>
               ) : pendingInvite.preview?.valid ? (
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -212,26 +204,9 @@ export function GroupsHomeView({
                       </button>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => handleAccept(pendingInvite.token)}
-                        disabled={accepting}
-                      >
-                        <Check size={16} />
-                        {accepting ? 'Accesso al gruppo…' : 'Accetta ed entra nel gruppo'}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={onDeclineInvite}
-                        disabled={accepting}
-                      >
-                        <X size={15} />
-                        Rifiuta
-                      </button>
-                    </div>
+                    <AcceptInviteForm key={pendingInvite.token} preview={pendingInvite.preview} defaultName={defaultName}
+                      onAccept={(choice) => onAcceptInvite(pendingInvite.token, choice)} onDecline={onDeclineInvite}
+                      onRefresh={() => onInspectInviteToken(pendingInvite.token)} />
                   )}
                 </>
               ) : (
@@ -268,12 +243,20 @@ export function GroupsHomeView({
             </section>
           )}
 
-          {loading && groups.length === 0 ? (
+          {loadError && <div role="alert" className="alert alert-warning">{loadError} <button className="link-btn" onClick={onRetryLoad}>Riprova</button></div>}
+          {isGuest && <div className="device-note"><MonitorSmartphone size={18} /><span>Il tuo elenco è salvato su questo dispositivo.</span>
+            <button className="link-btn" onClick={onAccount}>Collega un account →</button></div>}
+          {bookmarks.length > 0 && groups.length === 0 && (loading || loadError) ? (
+            <section className="groups-list" aria-label="Elenco salvato sul dispositivo">
+              <p className="field-hint">Ultimo elenco salvato · Per aprire un gruppo serve la connessione.</p>
+              {bookmarks.map((g) => <button className="card group-card" key={g.id} onClick={() => onSelectGroup(g.id)}>{g.name}<ChevronRight size={16} /></button>)}
+            </section>
+          ) : loading && groups.length === 0 ? (
             <div className="center-loader" style={{ minHeight: '36dvh' }}>
               <span className="spinner" />
               <span>Caricamento dei gruppi…</span>
             </div>
-          ) : groups.length === 0 ? (
+          ) : loadError && groups.length === 0 ? null : groups.length === 0 ? (
             <div className="card empty-state">
               <span className="empty-icon">
                 <Users size={22} />
@@ -429,31 +412,7 @@ export function GroupsHomeView({
             </div>
           )}
 
-          {showDemoInviteShortcut && (
-            <div
-              className="card-subtle"
-              style={{
-                marginTop: 18,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span className="text-secondary" style={{ fontSize: 13.5 }}>
-                Vuoi vedere come funziona l&apos;accettazione di un invito tramite link?
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => onInspectInviteToken(DEMO_SAMPLE_INVITE_TOKEN)}
-              >
-                <Link2 size={14} />
-                Simula apertura link d&apos;invito
-              </button>
-            </div>
-          )}
+
         </>
       )}
 
@@ -512,6 +471,11 @@ export function GroupsHomeView({
             />
           </label>
 
+          <label className="field">
+            <span className="field-label">Altri partecipanti <span className="field-hint">Opzionale</span></span>
+            <textarea className="input" rows={3} placeholder={'Un nome per riga, per esempio:\nAnna\nLuca'} value={participants} onChange={(e) => setParticipants(e.target.value)} />
+            <span className="field-hint">Tu ci sei già. Gli altri potranno scegliere il proprio nome aprendo l’invito.</span>
+          </label>
           <label className="field">
             <span className="field-label">Valuta di riferimento del gruppo</span>
             <select

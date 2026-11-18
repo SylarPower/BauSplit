@@ -140,7 +140,7 @@ export interface ExchangeRateResult {
   source: 'ecb' | 'fallback';
 }
 
-const RATE_CACHE_KEY = 'conti_insieme_fx_cache_v1';
+const RATE_CACHE_KEY = 'bausplit_fx_cache_v1';
 const memoryRateCache = new Map<string, ExchangeRateResult>();
 
 function readCachedRate(key: string): ExchangeRateResult | null {

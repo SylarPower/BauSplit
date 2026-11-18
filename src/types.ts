@@ -43,9 +43,9 @@ export interface UserProfile {
 }
 
 export interface GroupMember {
-  userId: string;
+  userId: string; // posto stabile nei conti del gruppo
+  ownerId: string | null; // accesso ospite/account; null = nessun accesso
   displayName: string;
-  email: string;
   joinedAt: string;
   leftAt: string | null;
 }
@@ -222,7 +222,18 @@ export interface InvitePreview {
   createdByName?: string;
   memberCount?: number;
   alreadyMember?: boolean;
+  availableNames?: { id: string; name: string }[];
+  returningName?: string;
 }
+
+export interface CreateGroupInput {
+  name: string;
+  description: string;
+  baseCurrency: string;
+  participants: string[];
+}
+
+export type InviteChoice = { memberId: string } | { name: string } | null;
 
 export interface ExpenseInput {
   id?: string;

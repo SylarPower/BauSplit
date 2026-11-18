@@ -1095,7 +1095,8 @@ export function ExpensesTab({
               <div className="kv-row">
                 <span className="kv-key">Registrato da</span>
                 <span className="kv-val">
-                  {nameOf(selectedSettlement.createdBy)} ·{' '}
+                  {(activityLogs.find((log) => log.entityId === selectedSettlement.id && log.action === 'created')?.actorName ??
+                    members.find((m) => m.ownerId === selectedSettlement.createdBy)?.displayName ?? 'Membro')} ·{' '}
                   {formatDateTimeIT(selectedSettlement.createdAt)}
                 </span>
               </div>

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Conti Insieme — Schema completo Supabase (PostgreSQL + RLS + RPC + Realtime)
+-- BauSplit — Schema completo Supabase (PostgreSQL + RLS + RPC + Realtime)
 -- =============================================================================
 -- Istruzioni:
 -- 1. Apri la dashboard di Supabase -> SQL Editor -> New query
@@ -7,6 +7,8 @@
 -- 3. Lo script è idempotente: può essere rieseguito in sicurezza senza perdere dati.
 --    (Non elimina la vecchia tabella `activities`, se presente.)
 -- =============================================================================
+
+begin;
 
 -- -----------------------------------------------------------------------------
 -- 1. Funzioni di utilità di base
@@ -46,6 +48,17 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Autorizzazioni temporanee, mai esposte tramite le API del sito.
+create schema if not exists bausplit_private;
+revoke all on schema bausplit_private from public, anon, authenticated;
+create table if not exists bausplit_private.account_links (
+  guest_id uuid primary key references auth.users(id) on delete cascade,
+  account_id uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null,
+  completed_at timestamptz
+);
+revoke all on bausplit_private.account_links from public, anon, authenticated;
+
 -- Gruppi privati di spesa (con supporto a chiusura e trasferimento saldo)
 create table if not exists public.expense_groups (
   id uuid primary key default gen_random_uuid(),
@@ -69,14 +82,31 @@ alter table public.expense_groups add column if not exists closed_by uuid null r
 alter table public.expense_groups add column if not exists closed_into_group_id uuid null references public.expense_groups(id) on delete set null;
 alter table public.expense_groups add column if not exists closed_into_group_name text null;
 
--- Membri dei gruppi (`left_at is null` = membro attivo; se valorizzato conserva lo storico e il saldo)
+-- user_id è il posto stabile nel libro delle spese, non la credenziale di accesso.
+-- owner_id identifica chi lo occupa; un nome preparato prima dell'invito non ha proprietario.
 create table if not exists public.group_members (
   group_id uuid not null references public.expense_groups(id) on delete cascade,
-  user_id uuid not null references public.profiles(id) on delete cascade,
+  user_id uuid not null default gen_random_uuid(),
   joined_at timestamptz not null default now(),
   left_at timestamptz null,
   primary key (group_id, user_id)
 );
+
+-- Solo durante la prima migrazione: non assegnare mai un nome libero al secondo Run.
+DO $$
+begin
+  if not exists (select from information_schema.columns where table_schema = 'public'
+      and table_name = 'group_members' and column_name = 'owner_id') then
+    alter table public.group_members add column owner_id uuid references public.profiles(id);
+    update public.group_members set owner_id = user_id;
+  end if;
+end;
+$$;
+alter table public.group_members drop constraint if exists group_members_user_id_fkey;
+alter table public.group_members alter column user_id set default gen_random_uuid();
+alter table public.group_members add column if not exists display_name text
+  check (char_length(trim(display_name)) between 1 and 60);
+create unique index if not exists idx_group_members_owner on public.group_members (owner_id, group_id);
 
 create index if not exists idx_group_members_user_active
   on public.group_members (user_id)
@@ -110,7 +140,7 @@ create table if not exists public.recurring_expenses (
   fixed_exchange_rate numeric(18,8) null check (fixed_exchange_rate is null or fixed_exchange_rate > 0),
   category text not null default 'altro',
   category_label text not null default 'Altro',
-  paid_by uuid not null references public.profiles(id),
+  paid_by uuid not null,
   split_mode text not null check (split_mode in ('equal', 'exact', 'percentage')),
   splits jsonb not null,
   note text not null default '' check (char_length(note) <= 500),
@@ -142,7 +172,7 @@ create table if not exists public.expenses (
   expense_date date not null default current_date,
   category text not null default 'altro',
   category_label text not null default 'Altro',
-  paid_by uuid not null references public.profiles(id),
+  paid_by uuid not null,
   split_mode text not null check (split_mode in ('equal', 'exact', 'percentage')),
   note text not null default '' check (char_length(note) <= 500),
   recurring_id uuid null references public.recurring_expenses(id) on delete set null,
@@ -165,7 +195,7 @@ create table if not exists public.expense_splits (
   id uuid primary key default gen_random_uuid(),
   expense_id uuid not null references public.expenses(id) on delete cascade,
   group_id uuid not null references public.expense_groups(id) on delete cascade,
-  user_id uuid not null references public.profiles(id),
+  user_id uuid not null,
   amount numeric(14,2) not null check (amount >= 0),
   base_amount numeric(14,2) not null check (base_amount >= 0),
   percentage numeric(7,4) null,
@@ -182,8 +212,8 @@ create index if not exists idx_expense_splits_expense
 create table if not exists public.settlements (
   id uuid primary key default gen_random_uuid(),
   group_id uuid not null references public.expense_groups(id) on delete cascade,
-  from_user uuid not null references public.profiles(id),
-  to_user uuid not null references public.profiles(id),
+  from_user uuid not null,
+  to_user uuid not null,
   amount numeric(14,2) not null check (amount > 0),
   currency text not null check (currency ~ '^[A-Z]{3}$'),
   exchange_rate numeric(18,8) not null default 1 check (exchange_rate > 0),
@@ -210,6 +240,24 @@ alter table public.settlements
 create index if not exists idx_settlements_group_date
   on public.settlements (group_id, settlement_date desc, created_at desc);
 
+-- Le quote appartengono a un partecipante DI QUEL gruppo, anche senza un account.
+-- Sostituisce i vecchi riferimenti ai profili; non riscrive spese, importi o ID.
+do $$
+declare r record;
+begin
+  for r in select * from (values ('expenses','paid_by'), ('recurring_expenses','paid_by'),
+      ('expense_splits','user_id'), ('settlements','from_user'), ('settlements','to_user')) as x(tab, col)
+  loop
+    execute format('alter table public.%I drop constraint if exists %I', r.tab, r.tab || '_' || r.col || '_fkey');
+    if not exists (select from pg_constraint where conrelid = format('public.%I', r.tab)::regclass
+        and conname = r.col || '_group_member_fk') then
+      execute format('alter table public.%I add constraint %I foreign key (group_id, %I) references public.group_members(group_id, user_id)',
+        r.tab, r.col || '_group_member_fk', r.col);
+    end if;
+  end loop;
+end;
+$$;
+
 -- Storico completo delle attività (immutabile: chi ha fatto cosa e quando)
 create table if not exists public.activity_logs (
   id uuid primary key default gen_random_uuid(),
@@ -226,6 +274,24 @@ create table if not exists public.activity_logs (
   changes jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+
+-- Conserva il nome di chi ha agito anche se il suo accesso cambia in seguito.
+alter table public.activity_logs add column if not exists actor_name text;
+update public.activity_logs l set actor_name = p.display_name
+from public.profiles p where l.actor_id = p.id and l.actor_name is null;
+
+create or replace function public.stamp_actor_name() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  select coalesce(gm.display_name, p.display_name) into new.actor_name
+    from public.profiles p left join public.group_members gm
+    on gm.owner_id = p.id and gm.group_id = new.group_id where p.id = new.actor_id;
+  return new;
+end;
+$$;
+drop trigger if exists trg_actor_name on public.activity_logs;
+create trigger trg_actor_name before insert on public.activity_logs
+  for each row execute function public.stamp_actor_name();
 
 -- Aggiorna il vincolo action se la tabella esisteva già
 alter table public.activity_logs drop constraint if exists activity_logs_action_check;
@@ -284,7 +350,7 @@ begin
   v_name := coalesce(
     nullif(trim(new.raw_user_meta_data->>'display_name'), ''),
     nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
-    split_part(coalesce(new.email, 'Utente'), '@', 1)
+    nullif(split_part(coalesce(new.email, ''), '@', 1), ''), 'Ospite'
   );
   v_name := left(v_name, 60);
 
@@ -311,7 +377,7 @@ select
     coalesce(
       nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
       nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
-      split_part(coalesce(u.email, 'Utente'), '@', 1)
+      nullif(split_part(coalesce(u.email, ''), '@', 1), ''), 'Ospite'
     ),
     60
   )
@@ -332,8 +398,13 @@ begin
     raise exception 'Autenticazione richiesta';
   end if;
 
-  select * into v_profile from public.profiles where id = v_uid;
-  if found then
+  -- Serializza ingresso/creazione e collegamento: nessun gruppo deve restare
+  -- su un vecchio accesso ospite, nemmeno se ci sono due schede aperte.
+  select * into v_profile from public.profiles where id = v_uid for no key update;
+  if exists (select from bausplit_private.account_links where guest_id = v_uid and completed_at is not null) then
+    raise exception 'I gruppi di questo dispositivo sono già collegati: accedi al tuo account';
+  end if;
+  if v_profile.id is not null then
     return v_profile;
   end if;
 
@@ -345,7 +416,7 @@ begin
       coalesce(
         nullif(trim(u.raw_user_meta_data->>'display_name'), ''),
         nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
-        split_part(coalesce(u.email, 'Utente'), '@', 1)
+        nullif(split_part(coalesce(u.email, ''), '@', 1), ''), 'Ospite'
       ),
       60
     )
@@ -373,8 +444,15 @@ as $$
     select 1
     from public.group_members gm
     where gm.group_id = p_group_id
-      and gm.user_id = auth.uid()
+      and gm.owner_id = auth.uid()
       and gm.left_at is null
+  );
+$$;
+
+create or replace function public.can_edit_group(p_group_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select public.is_active_group_member(p_group_id) and exists (
+    select from public.expense_groups where id = p_group_id and closed_at is null
   );
 $$;
 
@@ -391,9 +469,9 @@ as $$
       select 1
       from public.group_members me
       join public.group_members other_m on other_m.group_id = me.group_id
-      where me.user_id = auth.uid()
+      where me.owner_id = auth.uid()
         and me.left_at is null
-        and other_m.user_id = p_target_user
+        and other_m.owner_id = p_target_user
     );
 $$;
 
@@ -437,8 +515,8 @@ create policy expense_groups_select on public.expense_groups
 drop policy if exists expense_groups_update on public.expense_groups;
 create policy expense_groups_update on public.expense_groups
   for update to authenticated
-  using (public.is_active_group_member(id))
-  with check (public.is_active_group_member(id));
+  using (public.can_edit_group(id))
+  with check (public.can_edit_group(id));
 
 -- group_members
 drop policy if exists group_members_select on public.group_members;
@@ -455,18 +533,18 @@ create policy group_categories_select on public.group_categories
 drop policy if exists group_categories_insert on public.group_categories;
 create policy group_categories_insert on public.group_categories
   for insert to authenticated
-  with check (public.is_active_group_member(group_id) and created_by = auth.uid());
+  with check (public.can_edit_group(group_id) and created_by = auth.uid());
 
 drop policy if exists group_categories_update on public.group_categories;
 create policy group_categories_update on public.group_categories
   for update to authenticated
-  using (public.is_active_group_member(group_id))
-  with check (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id))
+  with check (public.can_edit_group(group_id));
 
 drop policy if exists group_categories_delete on public.group_categories;
 create policy group_categories_delete on public.group_categories
   for delete to authenticated
-  using (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id));
 
 -- recurring_expenses
 drop policy if exists recurring_expenses_select on public.recurring_expenses;
@@ -478,7 +556,7 @@ drop policy if exists recurring_expenses_insert on public.recurring_expenses;
 create policy recurring_expenses_insert on public.recurring_expenses
   for insert to authenticated
   with check (
-    public.is_active_group_member(group_id)
+    public.can_edit_group(group_id)
     and created_by = auth.uid()
     and updated_by = auth.uid()
   );
@@ -486,13 +564,13 @@ create policy recurring_expenses_insert on public.recurring_expenses
 drop policy if exists recurring_expenses_update on public.recurring_expenses;
 create policy recurring_expenses_update on public.recurring_expenses
   for update to authenticated
-  using (public.is_active_group_member(group_id))
-  with check (public.is_active_group_member(group_id) and updated_by = auth.uid());
+  using (public.can_edit_group(group_id))
+  with check (public.can_edit_group(group_id) and updated_by = auth.uid());
 
 drop policy if exists recurring_expenses_delete on public.recurring_expenses;
 create policy recurring_expenses_delete on public.recurring_expenses
   for delete to authenticated
-  using (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id));
 
 -- expenses
 drop policy if exists expenses_select on public.expenses;
@@ -504,7 +582,7 @@ drop policy if exists expenses_insert on public.expenses;
 create policy expenses_insert on public.expenses
   for insert to authenticated
   with check (
-    public.is_active_group_member(group_id)
+    public.can_edit_group(group_id)
     and created_by = auth.uid()
     and updated_by = auth.uid()
   );
@@ -512,13 +590,13 @@ create policy expenses_insert on public.expenses
 drop policy if exists expenses_update on public.expenses;
 create policy expenses_update on public.expenses
   for update to authenticated
-  using (public.is_active_group_member(group_id))
-  with check (public.is_active_group_member(group_id) and updated_by = auth.uid());
+  using (public.can_edit_group(group_id))
+  with check (public.can_edit_group(group_id) and updated_by = auth.uid());
 
 drop policy if exists expenses_delete on public.expenses;
 create policy expenses_delete on public.expenses
   for delete to authenticated
-  using (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id));
 
 -- expense_splits
 drop policy if exists expense_splits_select on public.expense_splits;
@@ -529,18 +607,18 @@ create policy expense_splits_select on public.expense_splits
 drop policy if exists expense_splits_insert on public.expense_splits;
 create policy expense_splits_insert on public.expense_splits
   for insert to authenticated
-  with check (public.is_active_group_member(group_id));
+  with check (public.can_edit_group(group_id));
 
 drop policy if exists expense_splits_update on public.expense_splits;
 create policy expense_splits_update on public.expense_splits
   for update to authenticated
-  using (public.is_active_group_member(group_id))
-  with check (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id))
+  with check (public.can_edit_group(group_id));
 
 drop policy if exists expense_splits_delete on public.expense_splits;
 create policy expense_splits_delete on public.expense_splits
   for delete to authenticated
-  using (public.is_active_group_member(group_id));
+  using (public.can_edit_group(group_id));
 
 -- settlements
 drop policy if exists settlements_select on public.settlements;
@@ -552,7 +630,7 @@ drop policy if exists settlements_insert on public.settlements;
 create policy settlements_insert on public.settlements
   for insert to authenticated
   with check (
-    public.is_active_group_member(group_id)
+    kind = 'settlement' and public.can_edit_group(group_id)
     and created_by = auth.uid()
     and updated_by = auth.uid()
     and exists (
@@ -568,9 +646,9 @@ create policy settlements_insert on public.settlements
 drop policy if exists settlements_update on public.settlements;
 create policy settlements_update on public.settlements
   for update to authenticated
-  using (public.is_active_group_member(group_id))
+  using (kind = 'settlement' and public.can_edit_group(group_id))
   with check (
-    public.is_active_group_member(group_id)
+    kind = 'settlement' and public.can_edit_group(group_id)
     and updated_by = auth.uid()
     and exists (
       select 1 from public.group_members gm
@@ -585,7 +663,7 @@ create policy settlements_update on public.settlements
 drop policy if exists settlements_delete on public.settlements;
 create policy settlements_delete on public.settlements
   for delete to authenticated
-  using (public.is_active_group_member(group_id));
+  using (kind = 'settlement' and public.can_edit_group(group_id));
 
 -- activity_logs (sola lettura + append per i membri attivi; nessuna modifica/cancellazione)
 drop policy if exists activity_logs_select on public.activity_logs;
@@ -596,17 +674,42 @@ create policy activity_logs_select on public.activity_logs
 drop policy if exists activity_logs_insert on public.activity_logs;
 create policy activity_logs_insert on public.activity_logs
   for insert to authenticated
-  with check (public.is_active_group_member(group_id) and actor_id = auth.uid());
+  with check (public.can_edit_group(group_id) and actor_id = auth.uid());
 
 -- -----------------------------------------------------------------------------
 -- 6. Funzioni RPC atomiche (Gruppi, Inviti, Spese, Uscita, Chiusura con riporto saldo)
 -- -----------------------------------------------------------------------------
 
+-- Un nome non dà accesso: crea soltanto un posto utilizzabile nelle divisioni.
+create or replace function public.add_group_participant(p_group_id uuid, p_name text)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare
+  v_name text := trim(coalesce(p_name, ''));
+  v_id uuid;
+begin
+  if not public.is_active_group_member(p_group_id) then raise exception 'Accesso non consentito'; end if;
+  perform 1 from public.expense_groups where id = p_group_id and closed_at is null for update;
+  if not found then raise exception 'Il gruppo è chiuso'; end if;
+  if length(v_name) not between 1 and 60 then raise exception 'Scegli un nome da 1 a 60 caratteri'; end if;
+  if exists (select from public.group_members m left join public.profiles p on p.id = m.owner_id
+      where m.group_id = p_group_id and m.left_at is null
+        and lower(coalesce(m.display_name, p.display_name)) = lower(v_name)) then
+    raise exception 'Questo nome è già presente nel gruppo';
+  end if;
+  insert into public.group_members(group_id, display_name) values (p_group_id, v_name) returning user_id into v_id;
+  insert into public.activity_logs(group_id, actor_id, entity_type, entity_id, action, summary)
+    values (p_group_id, auth.uid(), 'member', v_id, 'created', format('Ha aggiunto %s ai partecipanti', v_name));
+  return v_id;
+end;
+$$;
+
 -- Creazione nuovo gruppo
+drop function if exists public.create_expense_group(text, text, text);
 create or replace function public.create_expense_group(
   p_name text,
   p_description text default '',
-  p_base_currency text default 'EUR'
+  p_base_currency text default 'EUR',
+  p_participants text[] default '{}'
 )
 returns public.expense_groups
 language plpgsql
@@ -616,6 +719,7 @@ as $$
 declare
   v_profile public.profiles;
   v_group public.expense_groups;
+  v_name text;
   v_currency text := upper(trim(coalesce(p_base_currency, 'EUR')));
 begin
   v_profile := public.ensure_current_profile();
@@ -632,8 +736,12 @@ begin
   values (left(trim(p_name), 80), left(trim(coalesce(p_description, '')), 280), v_currency, v_profile.id)
   returning * into v_group;
 
-  insert into public.group_members (group_id, user_id)
+  insert into public.group_members (group_id, owner_id)
   values (v_group.id, v_profile.id);
+
+  foreach v_name in array coalesce(p_participants, '{}'::text[]) loop
+    perform public.add_group_participant(v_group.id, v_name);
+  end loop;
 
   insert into public.activity_logs (group_id, actor_id, entity_type, entity_id, action, summary, changes)
   values (
@@ -696,7 +804,7 @@ begin
     select 1
     from public.group_members gm
     where gm.group_id = v_group.id
-      and gm.user_id = v_uid
+      and gm.owner_id = v_uid
       and gm.left_at is null
   ) into v_already_member;
 
@@ -708,13 +816,18 @@ begin
     'base_currency', v_group.base_currency,
     'created_by_name', coalesce(v_creator_name, 'Un membro'),
     'member_count', v_member_count,
-    'already_member', v_already_member
+    'already_member', v_already_member,
+    'returning_name', (select coalesce(m.display_name, p.display_name) from public.group_members m
+      join public.profiles p on p.id = m.owner_id where m.group_id = v_group.id and m.owner_id = v_uid and m.left_at is not null),
+    'available_names', coalesce((select jsonb_agg(jsonb_build_object('id', user_id, 'name', display_name) order by display_name)
+      from public.group_members where group_id = v_group.id and owner_id is null and left_at is null), '[]'::jsonb)
   );
 end;
 $$;
 
 -- Accettazione esplicita dell'invito a un gruppo
-create or replace function public.accept_group_invite(p_token text)
+drop function if exists public.accept_group_invite(text);
+create or replace function public.accept_group_invite(p_token text, p_member_id uuid default null, p_name text default null)
 returns uuid
 language plpgsql
 security definer
@@ -723,13 +836,14 @@ as $$
 declare
   v_profile public.profiles;
   v_group public.expense_groups;
-  v_was_active boolean;
+  v_member public.group_members;
+  v_name text;
 begin
   v_profile := public.ensure_current_profile();
 
   select * into v_group
   from public.expense_groups
-  where invite_token = trim(coalesce(p_token, ''));
+  where invite_token = trim(coalesce(p_token, '')) for update;
 
   if not found then
     raise exception 'Questo link d''invito non è valido o è stato rigenerato';
@@ -743,34 +857,35 @@ begin
     raise exception 'Il link d''invito per questo gruppo è attualmente disattivato';
   end if;
 
-  select exists (
-    select 1
-    from public.group_members gm
-    where gm.group_id = v_group.id
-      and gm.user_id = v_profile.id
-      and gm.left_at is null
-  ) into v_was_active;
-
-  if v_was_active then
-    return v_group.id;
+  select * into v_member from public.group_members where group_id = v_group.id and owner_id = v_profile.id;
+  if found then
+    if v_member.left_at is null then return v_group.id; end if;
+    -- Rientro: conserva il posto e i saldi precedenti, non prenderne un secondo.
+    update public.group_members set left_at = null, joined_at = now()
+      where group_id = v_group.id and user_id = v_member.user_id;
+  elsif p_member_id is not null then
+    update public.group_members set owner_id = v_profile.id
+      where group_id = v_group.id and user_id = p_member_id and owner_id is null and left_at is null
+      returning * into v_member;
+    if not found then raise exception 'Questo nome non è più disponibile. Scegline un altro'; end if;
+  else
+    v_name := trim(coalesce(p_name, ''));
+    if length(v_name) not between 1 and 60 then raise exception 'Scegli un nome da 1 a 60 caratteri'; end if;
+    if exists (select from public.group_members m left join public.profiles p on p.id = m.owner_id
+        where m.group_id = v_group.id and m.left_at is null and lower(coalesce(m.display_name, p.display_name)) = lower(v_name)) then
+      raise exception 'Nome già presente: sceglilo dall’elenco se è tuo, oppure usa un nome diverso';
+    end if;
+    insert into public.group_members(group_id, owner_id, display_name)
+      values (v_group.id, v_profile.id, nullif(v_name, v_profile.display_name)) returning * into v_member;
   end if;
 
-  insert into public.group_members (group_id, user_id, joined_at, left_at)
-  values (v_group.id, v_profile.id, now(), null)
-  on conflict (group_id, user_id) do update
-    set joined_at = now(),
-        left_at = null;
-
+  v_name := coalesce(v_member.display_name, v_profile.display_name);
+  if v_profile.display_name = 'Ospite' and exists (select from auth.users where id = v_profile.id and is_anonymous is true) then
+    update public.profiles set display_name = v_name where id = v_profile.id;
+  end if;
   insert into public.activity_logs (group_id, actor_id, entity_type, entity_id, action, summary, changes)
-  values (
-    v_group.id,
-    v_profile.id,
-    'member',
-    v_profile.id,
-    'joined',
-    format('%s ha accettato l''invito ed è entrato nel gruppo', v_profile.display_name),
-    jsonb_build_object('member_name', v_profile.display_name)
-  );
+  values (v_group.id, v_profile.id, 'member', v_member.user_id, 'joined',
+    format('%s ha accettato l''invito ed è entrato nel gruppo', v_name), jsonb_build_object('member_name', v_name));
 
   return v_group.id;
 end;
@@ -901,7 +1016,7 @@ begin
     raise exception 'Non fai parte di questo gruppo';
   end if;
 
-  select closed_at into v_closed_at from public.expense_groups where id = p_group_id;
+  select closed_at into v_closed_at from public.expense_groups where id = p_group_id for update;
   if v_closed_at is not null then
     raise exception 'Questo gruppo è chiuso: riaprilo per aggiungere o modificare spese';
   end if;
@@ -1067,7 +1182,7 @@ begin
     raise exception 'Accesso non consentito';
   end if;
 
-  select closed_at into v_closed_at from public.expense_groups where id = v_group_id;
+  select closed_at into v_closed_at from public.expense_groups where id = v_group_id for update;
   if v_closed_at is not null then
     raise exception 'Questo gruppo è chiuso: riaprilo per eliminare spese';
   end if;
@@ -1104,6 +1219,7 @@ declare
   v_net numeric(14,2);
   v_remaining integer;
   v_summary text;
+  v_member public.group_members;
 begin
   v_profile := public.ensure_current_profile();
 
@@ -1111,30 +1227,32 @@ begin
     raise exception 'Non fai parte di questo gruppo';
   end if;
 
-  select * into v_group from public.expense_groups where id = p_group_id;
+  select * into v_group from public.expense_groups where id = p_group_id for update;
+  select * into strict v_member from public.group_members where group_id = p_group_id and owner_id = auth.uid() and left_at is null;
+  v_profile.display_name := coalesce(v_member.display_name, v_profile.display_name);
 
   select coalesce(sum(base_amount), 0) into v_paid
   from public.expenses
-  where group_id = p_group_id and paid_by = v_profile.id;
+  where group_id = p_group_id and paid_by = v_member.user_id;
 
   select coalesce(sum(base_amount), 0) into v_owed
   from public.expense_splits
-  where group_id = p_group_id and user_id = v_profile.id;
+  where group_id = p_group_id and user_id = v_member.user_id;
 
   select coalesce(sum(base_amount), 0) into v_sent
   from public.settlements
-  where group_id = p_group_id and from_user = v_profile.id;
+  where group_id = p_group_id and from_user = v_member.user_id;
 
   select coalesce(sum(base_amount), 0) into v_received
   from public.settlements
-  where group_id = p_group_id and to_user = v_profile.id;
+  where group_id = p_group_id and to_user = v_member.user_id;
 
   v_net := round(v_paid - v_owed + v_sent - v_received, 2);
 
   update public.group_members
   set left_at = now()
   where group_id = p_group_id
-    and user_id = v_profile.id;
+    and user_id = v_member.user_id;
 
   select count(*)::integer into v_remaining
   from public.group_members
@@ -1163,7 +1281,7 @@ begin
     p_group_id,
     v_profile.id,
     'member',
-    v_profile.id,
+    v_member.user_id,
     'left',
     v_summary,
     jsonb_build_object(
@@ -1200,6 +1318,8 @@ declare
   v_item jsonb;
   v_debtor uuid;
   v_creditor uuid;
+  v_target_debtor uuid;
+  v_target_creditor uuid;
   v_src_amt numeric(14,2);
   v_dst_amt numeric(14,2);
   v_fx numeric(18,8);
@@ -1209,7 +1329,7 @@ begin
     raise exception 'Non fai parte di questo gruppo';
   end if;
 
-  select * into v_source from public.expense_groups where id = p_source_group_id;
+  select * into v_source from public.expense_groups where id = p_source_group_id for update;
   if not found then
     raise exception 'Gruppo non trovato';
   end if;
@@ -1227,7 +1347,7 @@ begin
       raise exception 'Non fai parte del gruppo di destinazione selezionato';
     end if;
 
-    select * into v_target from public.expense_groups where id = p_target_group_id;
+    select * into v_target from public.expense_groups where id = p_target_group_id for update;
     if not found then
       raise exception 'Gruppo di destinazione non trovato';
     end if;
@@ -1261,14 +1381,12 @@ begin
       end if;
 
       -- Verifica che entrambi gli utenti coinvolti siano membri attivi del gruppo di destinazione
-      if not exists (
-        select 1 from public.group_members gm
-        where gm.group_id = v_target.id and gm.user_id = v_debtor and gm.left_at is null
-      ) or not exists (
-        select 1 from public.group_members gm
-        where gm.group_id = v_target.id and gm.user_id = v_creditor and gm.left_at is null
-      ) then
-        raise exception 'Tutti gli utenti coinvolti nel saldo rimanente devono far parte del gruppo "%s"', v_target.name;
+      select dst.user_id into v_target_debtor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
+        where src.group_id = v_source.id and src.user_id = v_debtor and dst.group_id = v_target.id and dst.left_at is null;
+      select dst.user_id into v_target_creditor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
+        where src.group_id = v_source.id and src.user_id = v_creditor and dst.group_id = v_target.id and dst.left_at is null;
+      if v_target_debtor is null or v_target_creditor is null then
+        raise exception 'Tutti gli utenti coinvolti nel saldo rimanente devono far parte del gruppo "%"', v_target.name;
       end if;
 
       -- 1) Azzera il saldo nel gruppo di origine (transfer_out: debitore -> creditore)
@@ -1292,7 +1410,7 @@ begin
         settlement_date, kind, linked_group_name, note, created_by, updated_by
       )
       values (
-        v_target.id, v_creditor, v_debtor, v_src_amt, v_source.base_currency,
+        v_target.id, v_target_creditor, v_target_debtor, v_src_amt, v_source.base_currency,
         v_fx, coalesce(p_rate_date, current_date),
         case when v_source.base_currency = v_target.base_currency then false else coalesce(p_rate_is_manual, false) end,
         v_dst_amt,
@@ -1303,6 +1421,21 @@ begin
 
       v_count := v_count + 1;
     end loop;
+
+    -- Un altro membro potrebbe aver registrato una spesa da quando è stato
+    -- aperto il riepilogo. Non chiudere sulla base di una lista parziale o vecchia:
+    -- sollevare un errore annulla anche i riporti appena inseriti.
+    if exists (
+      select membro from (
+        select e.paid_by as membro,
+          case when abs(e.base_amount - sum(s.base_amount)) <= 0.01 then sum(s.base_amount) else e.base_amount end as delta
+        from public.expenses e left join public.expense_splits s on s.expense_id = e.id
+        where e.group_id = v_source.id group by e.id
+        union all select user_id, -base_amount from public.expense_splits where group_id = v_source.id
+        union all select from_user, base_amount from public.settlements where group_id = v_source.id
+        union all select to_user, -base_amount from public.settlements where group_id = v_source.id
+      ) ledger group by membro having sum(delta) <> 0
+    ) then raise exception 'I saldi sono cambiati. Riapri il riepilogo prima di spostarli'; end if;
 
     update public.expense_groups
     set updated_at = now()
@@ -1394,27 +1527,104 @@ begin
 end;
 $$;
 
+-- Passaggio dal dispositivo all'account. Servono ENTRAMBI gli accessi: prima
+-- l'ospite autorizza uno specifico account, poi quell'account verificato accetta.
+-- Né l'elenco locale, né un nome, né un invito sono una prova di proprietà.
+create or replace function public.authorize_guest_link(p_account_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists (select from auth.users where id = auth.uid() and is_anonymous is true)
+    or not exists (select from auth.users where id = p_account_id and is_anonymous is false and email_confirmed_at is not null) then
+    raise exception 'Servono il dispositivo originale e un account con email verificata';
+  end if;
+  insert into bausplit_private.account_links as l(guest_id, account_id, expires_at)
+    values (auth.uid(), p_account_id, now() + interval '5 minutes')
+    on conflict (guest_id) do update set account_id = excluded.account_id, expires_at = excluded.expires_at
+      where l.completed_at is null or l.account_id = excluded.account_id;
+  if not found then raise exception 'Questi gruppi sono già collegati a un altro account'; end if;
+end;
+$$;
+
+create or replace function public.link_guest_groups(p_guest_id uuid)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  v_account uuid := auth.uid();
+  v_link bausplit_private.account_links;
+  v_guest public.group_members;
+  v_existing public.group_members;
+  v_guest_name text;
+  v_summary text;
+begin
+  select * into v_link from bausplit_private.account_links
+    where guest_id = p_guest_id and account_id = v_account for update;
+  if not found or not exists (select from auth.users where id = v_account and is_anonymous is false and email_confirmed_at is not null) then
+    raise exception 'Collegamento non autorizzato';
+  end if;
+  if v_link.completed_at is not null then return; end if;
+  if v_link.expires_at < now() then raise exception 'Collegamento scaduto: riprova dal dispositivo originale'; end if;
+  select display_name into strict v_guest_name from public.profiles where id = p_guest_id for no key update;
+  for v_guest in select * from public.group_members where owner_id = p_guest_id order by group_id loop
+    perform 1 from public.expense_groups where id = v_guest.group_id for update;
+    select * into v_existing from public.group_members where group_id = v_guest.group_id and owner_id = v_account;
+    v_summary := format('Ha collegato il profilo ospite di %s al proprio account', coalesce(v_guest.display_name, v_guest_name));
+    if v_existing.user_id is not null and (v_existing.left_at is null or v_guest.left_at is not null) then
+      v_summary := v_summary || '. Il posto dell’account resta attivo; le quote del precedente nome restano distinte.';
+      -- Entrambi già presenti: resta il posto dell'account. Il secondo saldo non viene cancellato né sommato di nascosto.
+      update public.group_members set owner_id = null, left_at = coalesce(left_at, now()),
+        display_name = coalesce(display_name, v_guest_name)
+        where group_id = v_guest.group_id and user_id = v_guest.user_id;
+    else
+      if v_existing.user_id is not null then
+        -- L'account era già uscito: conserva il posto attivo dell'ospite, senza riattivare quello vecchio.
+        update public.group_members set owner_id = null, display_name = coalesce(display_name,
+          (select display_name from public.profiles where id = v_account))
+          where group_id = v_guest.group_id and user_id = v_existing.user_id;
+      end if;
+      update public.group_members set owner_id = v_account, display_name = coalesce(display_name, v_guest_name)
+        where group_id = v_guest.group_id and user_id = v_guest.user_id;
+    end if;
+    if v_guest.left_at is null then
+      insert into public.activity_logs(group_id, actor_id, entity_type, entity_id, action, summary)
+        values (v_guest.group_id, v_account, 'member', v_guest.user_id, 'updated', v_summary);
+    end if;
+  end loop;
+  update bausplit_private.account_links set completed_at = now() where guest_id = p_guest_id;
+end;
+$$;
+
+revoke all on function public.authorize_guest_link(uuid), public.link_guest_groups(uuid),
+  public.add_group_participant(uuid,text), public.accept_group_invite(text,uuid,text),
+  public.get_invite_preview(text), public.create_expense_group(text,text,text,text[]) from public, anon;
+grant execute on function public.authorize_guest_link(uuid), public.link_guest_groups(uuid),
+  public.add_group_participant(uuid,text) to authenticated;
+
 -- -----------------------------------------------------------------------------
 -- 7. Permessi ruoli
 -- -----------------------------------------------------------------------------
 
 grant usage on schema public to authenticated;
-grant select, insert, update on public.profiles to authenticated;
-grant select, update on public.expense_groups to authenticated;
+-- Le appartenenze, i link e le quote passano dalle funzioni controllate sopra.
+revoke all on public.profiles, public.expense_groups, public.group_members, public.expenses,
+  public.expense_splits, public.activity_logs, public.settlements, public.recurring_expenses,
+  public.group_categories from public, anon, authenticated;
+-- Ai membri servono i nomi, non gli indirizzi email degli altri.
+-- ensure_current_profile restituisce l'email completa solo al suo titolare.
+grant select (id, display_name), update (display_name) on public.profiles to authenticated;
+grant select, update (name, description) on public.expense_groups to authenticated;
 grant select on public.group_members to authenticated;
 grant select, insert, update, delete on public.group_categories to authenticated;
 grant select, insert, update, delete on public.recurring_expenses to authenticated;
-grant select, insert, update, delete on public.expenses to authenticated;
-grant select, insert, update, delete on public.expense_splits to authenticated;
+grant select on public.expenses to authenticated;
+grant select on public.expense_splits to authenticated;
 grant select, insert, update, delete on public.settlements to authenticated;
 grant select, insert on public.activity_logs to authenticated;
 
 grant execute on function public.ensure_current_profile() to authenticated;
 grant execute on function public.is_active_group_member(uuid) to authenticated;
 grant execute on function public.shares_group_with(uuid) to authenticated;
-grant execute on function public.create_expense_group(text, text, text) to authenticated;
+grant execute on function public.create_expense_group(text, text, text, text[]) to authenticated;
 grant execute on function public.get_invite_preview(text) to authenticated;
-grant execute on function public.accept_group_invite(text) to authenticated;
+grant execute on function public.accept_group_invite(text, uuid, text) to authenticated;
 grant execute on function public.regenerate_group_invite(uuid) to authenticated;
 grant execute on function public.set_group_invite_enabled(uuid, boolean) to authenticated;
 grant execute on function public.save_expense(uuid, uuid, text, numeric, text, numeric, date, boolean, numeric, date, text, text, uuid, text, text, jsonb, text, text, jsonb, uuid, date) to authenticated;
@@ -1454,3 +1664,6 @@ begin
   end loop;
 end;
 $$;
+
+notify pgrst, 'reload schema';
+commit;

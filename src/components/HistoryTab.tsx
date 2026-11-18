@@ -2,12 +2,11 @@ import { ChevronDown, ChevronUp, History } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { splitLogActorAndBody } from '../lib/audit';
 import { formatDateTimeIT } from '../lib/dates';
-import type { ActivityAction, ActivityLog, GroupMember } from '../types';
+import type { ActivityAction, ActivityLog } from '../types';
 import { Avatar } from './Icon';
 
 interface HistoryTabProps {
   logs: ActivityLog[];
-  members: GroupMember[];
 }
 
 const ACTION_BADGE: Record<ActivityAction, { label: string; className: string }> = {
@@ -29,10 +28,17 @@ const ACTION_BADGE: Record<ActivityAction, { label: string; className: string }>
 
 type EntityFilter = 'all' | 'expense' | 'settlement' | 'recurring' | 'group';
 
-export function HistoryTab({ logs, members }: HistoryTabProps) {
+export function HistoryTab({ logs }: HistoryTabProps) {
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
   const [actorFilter, setActorFilter] = useState<string>('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  // L'autore è l'accesso che ha agito, non necessariamente l'ID del posto nei conti.
+  const actors = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const log of logs) if (!names.has(log.actorId)) names.set(log.actorId, log.actorName);
+    return Array.from(names);
+  }, [logs]);
 
   const filtered = useMemo(() => {
     return logs.filter((l) => {
@@ -95,9 +101,9 @@ export function HistoryTab({ logs, members }: HistoryTabProps) {
             aria-label="Filtra storico per membro"
           >
             <option value="all">Tutti i membri</option>
-            {members.map((m) => (
-              <option key={m.userId} value={m.userId}>
-                {m.displayName}
+            {actors.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
               </option>
             ))}
           </select>
