@@ -5,7 +5,7 @@ import {
   convertToBaseAmount,
   roundCurrency,
 } from '../lib/accounting';
-import { CUSTOM_CATEGORY_ICONS, DEFAULT_CATEGORY_COLOR, entryCategories } from '../lib/categories';
+import { DEFAULT_CATEGORY_COLOR, entryCategories } from '../lib/categories';
 import {
   CURRENCIES,
   formatMoney,
@@ -33,7 +33,8 @@ import type {
   SplitMode,
 } from '../types';
 import { CategoryColorPicker } from './CategoryColorPicker';
-import { Avatar, CategoryIcon } from './Icon';
+import { CategoryIconPicker } from './CategoryIconPicker';
+import { Avatar } from './Icon';
 import { Modal } from './Modal';
 import { RateInput } from './RateInput';
 
@@ -681,23 +682,12 @@ export function ExpenseFormModal({
                 {creatingCat ? 'Creo…' : 'Aggiungi'}
               </button>
             </div>
-            <div className="swatch-row">
-              {CUSTOM_CATEGORY_ICONS.map((ic) => (
-                <button
-                  key={ic.id}
-                  type="button"
-                  title={ic.label}
-                  className={`icon-swatch ${newCatIcon === ic.id ? 'active' : ''}`}
-                  onClick={() => setNewCatIcon(ic.id)}
-                >
-                  <CategoryIcon
-                    icon={ic.id}
-                    color={newCatIcon === ic.id ? newCatColor : '#57534e'}
-                    size={16}
-                  />
-                </button>
-              ))}
-            </div>
+            <CategoryIconPicker
+              value={newCatIcon}
+              color={newCatColor}
+              onChange={setNewCatIcon}
+              disabled={creatingCat}
+            />
             <CategoryColorPicker
               value={newCatColor}
               onChange={setNewCatColor}

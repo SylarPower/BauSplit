@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CategoryManager } from '../src/components/CategoryManager';
 import { DEFAULT_EXPENSE_FILTERS, ExpensesTab } from '../src/components/ExpensesTab';
 import { computeGroupInsights } from '../src/lib/accounting';
-import { entryCategories } from '../src/lib/categories';
+import { CUSTOM_CATEGORY_ICONS, entryCategories } from '../src/lib/categories';
 import { generateGroupCsv } from '../src/lib/csv';
 import { processDueRecurringExpenses, SupabaseRepository } from '../src/lib/repository';
 import type { CategoryOption } from '../src/types';
@@ -163,12 +163,12 @@ it('nome nuovo anche in ricerca, dettaglio, filtri, CSV, Insights e prossima ric
   expect(within(screen.getByRole('dialog')).getByText(/^Dispensa ·/)).toBeTruthy();
 });
 
-it('le impostazioni modificano una predefinita sul posto, senza ricrearla né sovrascrivere campi immutati', async () => {
+function openCategoryManager(categories = catalog) {
   const save = vi.fn().mockResolvedValue('spesa');
   const move = vi.fn();
   render(
     <CategoryManager
-      categories={catalog}
+      categories={categories}
       onSaveCategory={save}
       onMoveCategory={move}
       onDeleteCategory={vi.fn()}
@@ -176,11 +176,29 @@ it('le impostazioni modificano una predefinita sul posto, senza ricrearla né so
     />
   );
   fireEvent.click(screen.getByText('Categorie del gruppo'));
+  return { save, move };
+}
+
+const iconChoices = () => within(screen.getByRole('group', { name: 'Icona della categoria' }));
+
+it('le impostazioni modificano una predefinita sul posto, senza ricrearla né sovrascrivere campi immutati', async () => {
+  const { save, move } = openCategoryManager();
   fireEvent.click(screen.getByRole('button', { name: 'Modifica Dispensa' }));
   fireEvent.change(screen.getByLabelText('Nome della categoria'), {
     target: { value: 'Alimentari' },
   });
-  fireEvent.change(screen.getByLabelText('Icona'), { target: { value: 'utensils' } });
+  const icons = iconChoices();
+  expect(screen.queryByRole('combobox')).toBeNull();
+  expect(icons.getByRole('radio', { name: 'Casa', checked: true })).toBeTruthy();
+  const choices = icons.getAllByRole<HTMLInputElement>('radio', { name: /\S/ });
+  expect(choices.map((c) => c.value)).toEqual(CUSTOM_CATEGORY_ICONS.map((i) => i.id));
+  // Non basta mostrare nomi o un'unica anteprima: ogni opzione ha il proprio disegno.
+  const drawings = choices.map((c) => c.labels?.[0].querySelector('svg')?.innerHTML);
+  expect(drawings.every(Boolean)).toBe(true);
+  expect(new Set(drawings).size).toBe(choices.length);
+  fireEvent.click(icons.getByTitle('Posate'));
+  expect(icons.getByRole('radio', { name: 'Posate', checked: true })).toBeTruthy();
+  expect(save).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.click(screen.getByRole('button', { name: 'Salva categoria' }));
   await waitFor(() => expect(screen.queryByLabelText('Nome della categoria')).toBeNull());
@@ -191,4 +209,33 @@ it('le impostazioni modificano una predefinita sul posto, senza ricrearla né so
   });
   fireEvent.click(screen.getByRole('button', { name: 'Sposta Dispensa su' }));
   await waitFor(() => expect(move).toHaveBeenCalledWith('spesa', -1));
+});
+
+it('cambiare solo il simbolo di una personalizzata richiede conferma; Annulla mantiene quello precedente', async () => {
+  const { save } = openCategoryManager();
+  const edit = screen.getByRole('button', { name: 'Modifica Milo' });
+  fireEvent.click(edit);
+  fireEvent.click(iconChoices().getByTitle('Caffè'));
+  fireEvent.click(screen.getByRole('button', { name: 'Annulla' }));
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.click(edit);
+  expect(iconChoices().getByRole('radio', { name: 'Animali', checked: true })).toBeTruthy();
+  fireEvent.click(iconChoices().getByTitle('Caffè'));
+  fireEvent.click(screen.getByRole('button', { name: 'Salva categoria' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('custom:cat', { icon: 'coffee' }));
+});
+
+it('tornare a un’icona salvata fuori catalogo non la sostituisce durante una rinomina', async () => {
+  const { save } = openCategoryManager([{ ...catalog[0], icon: 'vecchia-icona' }]);
+  fireEvent.click(screen.getByRole('button', { name: 'Modifica Milo' }));
+  const icons = iconChoices();
+  const original = icons.getByRole('radio', { name: 'Icona salvata', checked: true });
+  fireEvent.click(icons.getByTitle('Regalo'));
+  fireEvent.click(original);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Salva categoria' }).disabled).toBe(
+    true
+  );
+  fireEvent.change(screen.getByLabelText('Nome della categoria'), { target: { value: 'Animali' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Salva categoria' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('custom:cat', { name: 'Animali' }));
 });
