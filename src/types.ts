@@ -66,24 +66,16 @@ export interface ExpenseGroup {
   updatedAt: string;
 }
 
-export interface CustomCategory {
-  id: string;
-  groupId: string;
-  name: string;
-  icon: string;
-  color: string;
-  createdBy: string;
-  createdAt: string;
-}
-
 export interface CategoryOption {
   key: string; // es. 'spesa' oppure 'custom:<uuid>'
   name: string;
   icon: string;
   color: string;
-  isCustom: boolean;
-  customId?: string;
+  hidden: boolean;
 }
+
+export type CategoryStyle = Pick<CategoryOption, 'name' | 'icon' | 'color'>;
+export type CategoryPatch = Partial<CategoryStyle & { hidden: boolean }>;
 
 export interface ExpenseSplit {
   userId: string;
@@ -205,7 +197,7 @@ export interface GroupOverview {
 export interface GroupData {
   group: ExpenseGroup;
   members: GroupMember[]; // tutti i membri (attivi e usciti per risolvere i nomi storici)
-  customCategories: CustomCategory[];
+  categories: CategoryOption[]; // catalogo del gruppo, incluse quelle nascoste
   expenses: Expense[];
   settlements: Settlement[];
   recurringExpenses: RecurringExpense[];

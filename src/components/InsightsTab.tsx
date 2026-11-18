@@ -9,7 +9,7 @@ import {
 } from '../lib/dates';
 import type {
   CategoryInsight,
-  CustomCategory,
+  CategoryOption,
   DateRangePreset,
   Expense,
   GroupMember,
@@ -22,7 +22,7 @@ interface InsightsTabProps {
   expenses: Expense[];
   settlements: Settlement[];
   members: GroupMember[];
-  customCategories: CustomCategory[];
+  categories: CategoryOption[];
   onFilterByCategory: (categoryKey: string, preset: DateRangePreset, from: string, to: string) => void;
 }
 
@@ -103,7 +103,7 @@ export function InsightsTab({
   expenses,
   settlements,
   members,
-  customCategories,
+  categories,
   onFilterByCategory,
 }: InsightsTabProps) {
   const [preset, setPreset] = useState<DateRangePreset>('all');
@@ -121,12 +121,12 @@ export function InsightsTab({
         expenses,
         settlements,
         members,
-        customCategories,
+        categories,
         baseCurrency,
         range.from,
         range.to
       ),
-    [expenses, settlements, members, customCategories, baseCurrency, range.from, range.to]
+    [expenses, settlements, members, categories, baseCurrency, range.from, range.to]
   );
 
   const maxMonthTotal = Math.max(...insights.byMonth.map((m) => m.total), 0.01);

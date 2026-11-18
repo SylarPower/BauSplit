@@ -3,7 +3,7 @@ import type {
   ActivityChanges,
   ActivityEntityType,
   ActivityLog,
-  CustomCategory,
+  CategoryStyle,
   Expense,
   ExpenseGroup,
   ExpenseInput,
@@ -32,6 +32,13 @@ import { formatMoney } from '../../src/lib/currencies';
 import { addDaysISO, addMonthsClampedISO, formatFullDateIT, todayISO } from '../../src/lib/dates';
 import { FREQUENCY_LABELS } from '../../src/lib/recurring';
 import { buildCounterpartHint } from '../../src/lib/repository';
+
+interface CustomCategory extends CategoryStyle {
+  id: string;
+  groupId: string;
+  createdBy: string;
+  createdAt: string;
+}
 
 interface DemoDatabase {
   users: UserProfile[];
@@ -1285,9 +1292,10 @@ export class DemoRepository {
     return {
       group: { ...group },
       members: (db.members[groupId] ?? []).map((m) => ({ ...m })),
-      customCategories: db.customCategories
+      categories: db.customCategories
         .filter((c) => c.groupId === groupId)
-        .sort((a, b) => a.name.localeCompare(b.name, 'it')),
+        .sort((a, b) => a.name.localeCompare(b.name, 'it'))
+        .map(c => ({ key: `custom:${c.id}`, name: c.name, icon: c.icon, color: c.color, hidden: false })),
       expenses: db.expenses
         .filter((e) => e.groupId === groupId)
         .sort(

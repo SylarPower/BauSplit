@@ -82,6 +82,10 @@ alter table public.expense_groups add column if not exists closed_by uuid null r
 alter table public.expense_groups add column if not exists closed_into_group_id uuid null references public.expense_groups(id) on delete set null;
 alter table public.expense_groups add column if not exists closed_into_group_name text null;
 
+-- Solo le differenze rispetto alle categorie predefinite del catalogo.
+alter table public.expense_groups add column if not exists category_presets jsonb not null default '{}';
+alter table public.expense_groups add column if not exists category_order text[] not null default '{}';
+
 -- user_id è il posto stabile nel libro delle spese, non la credenziale di accesso.
 -- owner_id identifica chi lo occupa; un nome preparato prima dell'invito non ha proprietario.
 create table if not exists public.group_members (
@@ -126,6 +130,8 @@ create table if not exists public.group_categories (
   created_by uuid not null references public.profiles(id),
   created_at timestamptz not null default now()
 );
+
+alter table public.group_categories add column if not exists hidden boolean not null default false;
 
 create unique index if not exists idx_group_categories_unique_name
   on public.group_categories (group_id, lower(trim(name)));
@@ -679,6 +685,173 @@ create policy activity_logs_insert on public.activity_logs
 -- -----------------------------------------------------------------------------
 -- 6. Funzioni RPC atomiche (Gruppi, Inviti, Spese, Uscita, Chiusura con riporto saldo)
 -- -----------------------------------------------------------------------------
+
+-- Il catalogo contiene anche le categorie nascoste. Le chiavi restano quelle
+-- dei movimenti esistenti; nome, icona, colore e ordine appartengono al gruppo.
+create or replace function public.get_group_categories(p_group_id uuid)
+returns table (key text, name text, icon text, color text, hidden boolean)
+language sql stable security invoker set search_path = '' as $$
+  with g as (
+    select category_presets, category_order from public.expense_groups where id = p_group_id
+  ), catalog as (
+    select p.key, coalesce(o.v->>'name', p.name) as name, coalesce(o.v->>'icon', p.icon) as icon,
+      coalesce(o.v->>'color', p.color) as color, coalesce((o.v->>'hidden')::boolean, false) as hidden, p.pos
+    from g cross join (values
+      ('spesa', 'Spesa', 'shopping-basket', '#0F766E', 1),
+      ('ristoranti', 'Ristoranti e bar', 'utensils', '#C2410C', 2),
+      ('casa', 'Casa', 'home', '#1D4ED8', 3),
+      ('trasporti', 'Trasporti', 'car', '#4338CA', 5),
+      ('viaggi', 'Viaggi', 'plane', '#0369A1', 6),
+      ('svago', 'Svago', 'sparkles', '#7E22CE', 7),
+      ('shopping', 'Shopping', 'shopping-bag', '#BE185D', 8),
+      ('salute', 'Salute', 'heart-pulse', '#047857', 9),
+      ('abbonamenti', 'Abbonamenti', 'repeat', '#475569', 10),
+      ('regali', 'Regali', 'gift', '#B91C1C', 11),
+      ('altro', 'Altro', 'tag', '#78716C', 13)
+    ) p(key,name,icon,color,pos) cross join lateral (select g.category_presets->p.key as v) o
+    union all
+    select 'custom:' || c.id, c.name, c.icon, c.color, c.hidden, 12
+    from public.group_categories c where c.group_id = p_group_id
+  ), old_bills as (
+    select category_presets->'bollette' as prefs, exists (select from catalog where not hidden) as has_other_visible
+    from g
+  ), full_catalog as (
+    select * from catalog
+    union all
+    -- Non è una predefinita: mantieni la chiave nei gruppi che la usano già.
+    -- Senza preferenze è solo storica, a meno che fosse l'unica categoria visibile.
+    -- Se il gruppo l'aveva personalizzata, ne conserva invece anche la visibilità.
+    select 'bollette', coalesce(prefs->>'name','Bollette e utenze'), coalesce(prefs->>'icon','zap'),
+      coalesce(prefs->>'color','#B45309'), coalesce((prefs->>'hidden')::boolean, prefs is null and has_other_visible), 4
+    from old_bills
+    where prefs is not null or not has_other_visible
+      or exists (select from public.expenses where group_id = p_group_id and category = 'bollette')
+      or exists (select from public.recurring_expenses where group_id = p_group_id and category = 'bollette')
+  ) select c.key, c.name, c.icon, c.color, c.hidden from full_catalog c cross join g
+    order by array_position(g.category_order, c.key) nulls last, c.pos, lower(c.name), c.key;
+$$;
+
+-- Il lock serializza anche due modifiche fatte da dispositivi diversi e la chiusura del gruppo.
+create or replace function bausplit_private.lock_category_group(p_group_id uuid)
+returns void language plpgsql set search_path = '' as $$
+begin
+  if not public.is_active_group_member(p_group_id) then raise exception 'Accesso non consentito'; end if;
+  perform 1 from public.expense_groups where id = p_group_id and closed_at is null for update;
+  if not found then raise exception 'Il gruppo è chiuso'; end if;
+  -- Il posto potrebbe essere cambiato mentre attendevamo il lock del gruppo.
+  perform 1 from public.group_members where group_id = p_group_id and owner_id = auth.uid() and left_at is null for share;
+  if not found then raise exception 'Accesso non consentito'; end if;
+end;
+$$;
+
+-- Chiave nulla = nuova categoria personalizzata; campi nulli = nessuna modifica.
+create or replace function public.save_group_category(p_group_id uuid, p_key text,
+  p_name text default null, p_icon text default null, p_color text default null, p_hidden boolean default null)
+returns text language plpgsql security definer set search_path = '' as $$
+declare
+  v_old record;
+  v_key text := p_key;
+  v_id uuid;
+  v_name text := trim(p_name);
+  v_patch jsonb;
+  v_summary text;
+  v_changes jsonb := '{}';
+begin
+  perform bausplit_private.lock_category_group(p_group_id);
+  if v_name is not null and length(v_name) not between 1 and 40 then raise exception 'Scegli un nome da 1 a 40 caratteri'; end if;
+  if p_icon is not null and p_icon !~ '^[a-z][a-z0-9-]{0,39}$' then raise exception 'Icona non valida'; end if;
+  if p_color is not null and p_color !~ '^#[a-fA-F0-9]{6}$' then raise exception 'Colore non valido'; end if;
+  select * into v_old from public.get_group_categories(p_group_id) where key = p_key;
+  if p_key is not null and not found then raise exception 'Categoria non trovata nel gruppo'; end if;
+  if v_name is distinct from v_old.name and exists (select from public.get_group_categories(p_group_id)
+      where key is distinct from p_key and lower(trim(name)) = lower(v_name)) then
+    raise exception 'Esiste già una categoria con questo nome';
+  end if;
+  if p_key is null then
+    if v_name is null then raise exception 'Inserisci un nome per la categoria'; end if;
+    insert into public.group_categories(group_id, name, icon, color, hidden, created_by)
+      values (p_group_id, v_name, coalesce(p_icon,'tag'), coalesce(p_color,'#0F766E'), coalesce(p_hidden,false), auth.uid())
+      returning id into v_id;
+    v_key := 'custom:' || v_id;
+    v_summary := format('Ha creato la categoria "%s"', v_name);
+  else
+    if p_hidden and not v_old.hidden and not exists (select from public.get_group_categories(p_group_id)
+        where key <> p_key and not hidden) then raise exception 'Lascia visibile almeno una categoria'; end if;
+    v_patch := jsonb_strip_nulls(jsonb_build_object('name', v_name, 'icon', p_icon, 'color', p_color, 'hidden', p_hidden));
+    if (to_jsonb(v_old) @> v_patch) then return p_key; end if;
+    if p_key like 'custom:%' then
+      v_id := substr(p_key, 8)::uuid;
+      update public.group_categories set name = coalesce(v_name,name), icon = coalesce(p_icon,icon),
+        color = coalesce(p_color,color), hidden = coalesce(p_hidden,hidden) where group_id = p_group_id and id = v_id;
+    else
+      -- La prima rinomina di una categoria storica non deve renderla visibile da sola.
+      if p_key = 'bollette' and p_hidden is null then
+        v_patch := v_patch || jsonb_build_object('hidden', v_old.hidden);
+      end if;
+      update public.expense_groups set category_presets = jsonb_set(category_presets, array[p_key],
+        coalesce(category_presets->p_key, '{}'::jsonb) || v_patch) where id = p_group_id;
+    end if;
+    select jsonb_build_object('diffs', jsonb_agg(jsonb_build_object('field',label,'before',previous,'after',next))) into v_changes
+      from (values ('Nome', v_old.name, v_name), ('Icona', v_old.icon, p_icon), ('Colore', v_old.color, p_color),
+        ('Visibilità', case when v_old.hidden then 'Nascosta' else 'Visibile' end,
+          case p_hidden when true then 'Nascosta' when false then 'Visibile' end)) d(label,previous,next)
+      where next is not null and previous is distinct from next;
+    if v_name is not null and v_name <> v_old.name then
+      v_summary := format('Ha rinominato la categoria "%s" in "%s"', v_old.name, v_name);
+    elsif p_hidden is not null and p_hidden <> v_old.hidden then
+      v_summary := format('Ha %s la categoria "%s"', case when p_hidden then 'nascosto' else 'reso visibile' end, v_old.name);
+    else
+      v_summary := format('Ha aggiornato l’aspetto della categoria "%s"', v_old.name);
+    end if;
+  end if;
+  insert into public.activity_logs(group_id,actor_id,entity_type,entity_id,action,summary,changes)
+    values(p_group_id,auth.uid(),'category',v_id,case when p_key is null then 'created' else 'updated' end,v_summary,v_changes || jsonb_build_object('category_key',v_key));
+  return v_key;
+end;
+$$;
+
+create or replace function public.move_group_category(p_group_id uuid, p_key text, p_step integer)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_order text[]; i integer; v_name text;
+begin
+  perform bausplit_private.lock_category_group(p_group_id);
+  if p_step is null or p_step not in (-1,1) then raise exception 'Spostamento non valido'; end if;
+  select array_agg(c.key order by c.ordinality), max(c.name) filter (where c.key = p_key)
+    into v_order,v_name from public.get_group_categories(p_group_id) with ordinality c;
+  i := array_position(v_order,p_key);
+  if i is null then raise exception 'Categoria non trovata nel gruppo'; end if;
+  if i+p_step not between 1 and cardinality(v_order) then return; end if;
+  v_order[i] := v_order[i+p_step]; v_order[i+p_step] := p_key;
+  update public.expense_groups set category_order = v_order where id = p_group_id;
+  insert into public.activity_logs(group_id,actor_id,entity_type,action,summary)
+    values(p_group_id,auth.uid(),'category','updated',format('Ha spostato "%s" alla posizione %s',v_name,i+p_step));
+end;
+$$;
+
+-- Una categoria usata può essere nascosta, ma non si perde il nome delle sue spese.
+create or replace function public.delete_group_category(p_group_id uuid, p_key text)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_cat public.group_categories;
+begin
+  perform bausplit_private.lock_category_group(p_group_id);
+  select * into v_cat from public.group_categories where group_id = p_group_id and 'custom:' || id = p_key;
+  if not found then raise exception 'Puoi eliminare solo una categoria personalizzata del gruppo'; end if;
+  if exists(select from public.expenses where group_id = p_group_id and category = p_key) or
+     exists(select from public.recurring_expenses where group_id = p_group_id and category = p_key) then
+    raise exception 'Categoria già usata: puoi nasconderla senza perdere lo storico'; end if;
+  if not v_cat.hidden and not exists (select from public.get_group_categories(p_group_id)
+      where key <> p_key and not hidden) then raise exception 'Lascia visibile almeno una categoria'; end if;
+  delete from public.group_categories where id = v_cat.id;
+  update public.expense_groups set category_order = array_remove(category_order,p_key) where id = p_group_id and p_key = any(category_order);
+  insert into public.activity_logs(group_id,actor_id,entity_type,entity_id,action,summary)
+    values(p_group_id,auth.uid(),'category',v_cat.id,'deleted',format('Ha eliminato la categoria "%s"',v_cat.name));
+end;
+$$;
+
+revoke all on function public.get_group_categories(uuid), public.save_group_category(uuid,text,text,text,text,boolean),
+  public.move_group_category(uuid,text,integer), public.delete_group_category(uuid,text) from public, anon;
+grant execute on function public.get_group_categories(uuid), public.save_group_category(uuid,text,text,text,text,boolean),
+  public.move_group_category(uuid,text,integer), public.delete_group_category(uuid,text) to authenticated;
 
 -- Un nome non dà accesso: crea soltanto un posto utilizzabile nelle divisioni.
 create or replace function public.add_group_participant(p_group_id uuid, p_name text)
@@ -1612,7 +1785,7 @@ revoke all on public.profiles, public.expense_groups, public.group_members, publ
 grant select (id, display_name), update (display_name) on public.profiles to authenticated;
 grant select, update (name, description) on public.expense_groups to authenticated;
 grant select on public.group_members to authenticated;
-grant select, insert, update, delete on public.group_categories to authenticated;
+grant select on public.group_categories to authenticated; -- modifiche solo tramite le RPC delle categorie
 grant select, insert, update, delete on public.recurring_expenses to authenticated;
 grant select on public.expenses to authenticated;
 grant select on public.expense_splits to authenticated;

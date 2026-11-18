@@ -162,7 +162,8 @@ export function Workspace({
         showToast(translateErrorIT(err), true);
         setData(null);
         setGroupId(null);
-        void loadHome();
+        if (isMissingSchemaError(err)) setSchemaMissing(true);
+        else void loadHome();
       }
     },
     [repo, uid, loadHome, showToast]

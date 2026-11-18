@@ -185,7 +185,7 @@ export function buildExpenseUpdatedLog(
     });
   }
 
-  if (before.categoryLabel !== after.categoryLabel) {
+  if (before.category !== after.category) {
     diffs.push({
       field: 'Categoria',
       before: before.categoryLabel,

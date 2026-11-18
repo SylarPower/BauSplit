@@ -172,7 +172,7 @@ describe('Flusso end-to-end repository (gruppi, inviti, spese, cambi, rimborsi, 
       data.expenses,
       data.settlements,
       data.members,
-      data.customCategories,
+      data.categories,
       'EUR'
     );
     expect(insights.totalSpent).toBe(92);
@@ -393,7 +393,7 @@ describe('Flusso end-to-end repository (gruppi, inviti, spese, cambi, rimborsi, 
       casa.expenses,
       casa.settlements,
       casa.members,
-      casa.customCategories,
+      casa.categories,
       'EUR'
     );
     const casaBalBefore = computeMemberBalances(
@@ -470,7 +470,7 @@ describe('Flusso end-to-end repository (gruppi, inviti, spese, cambi, rimborsi, 
       casaUpdated.expenses,
       casaUpdated.settlements,
       casaUpdated.members,
-      casaUpdated.customCategories,
+      casaUpdated.categories,
       'EUR'
     );
     expect(casaInsightsAfter.totalSpent).toBe(casaInsightsBefore.totalSpent);
