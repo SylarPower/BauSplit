@@ -14,9 +14,9 @@ import { advanceRecurringDate, collectDueOccurrences } from './recurring';
 import { extractInviteToken } from './supabase';
 
 const MEMBERS: GroupMember[] = [
-  { userId: 'u1', ownerId: 'u1', displayName: 'Marco', joinedAt: '2026-01-01', leftAt: null },
-  { userId: 'u2', ownerId: 'u2', displayName: 'Giulia', joinedAt: '2026-01-01', leftAt: null },
-  { userId: 'u3', ownerId: 'u3', displayName: 'Luca', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u1', accessRole: 'editor', ownerId: 'u1', displayName: 'Marco', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u2', accessRole: 'editor', ownerId: 'u2', displayName: 'Giulia', joinedAt: '2026-01-01', leftAt: null },
+  { userId: 'u3', accessRole: 'editor', ownerId: 'u3', displayName: 'Luca', joinedAt: '2026-01-01', leftAt: null },
 ];
 
 function makeExpense(partial: Partial<Expense> & Pick<Expense, 'id' | 'paidBy' | 'baseAmount' | 'splits'>): Expense {

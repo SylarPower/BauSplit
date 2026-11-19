@@ -25,6 +25,7 @@ import {
 import { RateInput } from './RateInput';
 
 interface GroupSettingsModalProps extends CategoryManagerProps {
+  readOnly?: boolean;
   open: boolean;
   onClose: () => void;
   initialFocusClose?: boolean;
@@ -52,6 +53,7 @@ export function GroupSettingsModal({
   open,
   onClose,
   initialFocusClose = false,
+  readOnly = false,
   group,
   allGroups,
   quickMatches,
@@ -73,7 +75,8 @@ export function GroupSettingsModal({
 }: GroupSettingsModalProps) {
   const isClosed = group.closedAt !== null;
   const isEvent = !!group.quickCreatorSeat;
-  const eventCloseOnly = isEvent && initialFocusClose && !isClosed;
+  const canEdit = !readOnly && !isClosed;
+  const eventCloseOnly = isEvent && initialFocusClose && canEdit;
 
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description);
@@ -161,6 +164,8 @@ export function GroupSettingsModal({
   }, [open, group.id, initialFocusClose, resetRate]);
 
   const activeMembers = members.filter((m) => m.leftAt === null);
+  const otherOwners = activeMembers.filter((m) => m.ownerId && m.userId !== currentUserId);
+  const lastEditor = !readOnly && !otherOwners.some((m) => m.accessRole === 'editor');
   const myBalance = balances.find((b) => b.userId === currentUserId)?.netBalance ?? 0;
   const hasNonZeroMyBalance = Math.abs(myBalance) >= 0.01;
 
@@ -416,8 +421,8 @@ export function GroupSettingsModal({
                             'Verrà riportato solo il debito indicato sopra: la cena e le quote degli amici restano nella serata.'
                           ) : (
                             <>
-                              Sono mostrati solo i gruppi attivi in cui sono presenti tutti gli
-                              utenti coinvolti nel saldo rimanente (
+                              Sono mostrati solo i gruppi attivi che puoi modificare e in cui sono
+                              presenti tutti gli utenti coinvolti nel saldo rimanente (
                               {transferTargets.involvedUserIds.map(nameOf).join(', ')}).
                             </>
                           )}
@@ -518,13 +523,13 @@ export function GroupSettingsModal({
                     ? 'Solo chi ha creato la serata può riportare un saldo nel gruppo di coppia.'
                     : transfers.length > 1
                       ? 'Ci sono ancora più rimborsi da fare. In Saldi registra quelli degli amici prima di riportare il residuo della coppia.'
-                      : 'Non c’è un gruppo di coppia idoneo per questo saldo. Serve un gruppo aperto con voi due, riconosciuti dal posto scelto o da un invito accettato. Un nome uguale non basta.'}
+                      : 'Non c’è un gruppo di coppia idoneo per questo saldo. Serve un gruppo aperto che puoi modificare, con voi due riconosciuti dal posto scelto o da un invito accettato. Un nome uguale non basta.'}
                 </p>
               ) : (
                 <div className="alert alert-warning" style={{ flexDirection: 'column', gap: 6 }}>
                   <span>
-                    Non hai ancora un altro gruppo attivo che includa tutti gli utenti coinvolti nel
-                    saldo rimanente (
+                    Non hai un altro gruppo attivo che puoi modificare e che includa tutti i
+                    partecipanti al saldo rimanente (
                     <strong>{transferTargets.involvedUserIds.map(nameOf).join(', ')}</strong>).
                   </span>
                   {transferTargets.ineligible.length > 0 && (
@@ -593,7 +598,13 @@ export function GroupSettingsModal({
   return (
     <Modal
       open={open}
-      title={initialFocusClose && !isClosed ? 'Chiudi gruppo' : 'Impostazioni del gruppo'}
+      title={
+        readOnly
+          ? 'Dettagli del gruppo'
+          : initialFocusClose && !isClosed
+            ? 'Chiudi gruppo'
+            : 'Impostazioni del gruppo'
+      }
       onClose={onClose}
       wide
       footer={
@@ -603,9 +614,15 @@ export function GroupSettingsModal({
       }
     >
       <div className="form-stack">
-        {closingPanel}
+        {readOnly ? (
+          <p className="field-hint">
+            Puoi consultare i partecipanti e il conto, ma non modificarli.
+          </p>
+        ) : (
+          closingPanel
+        )}
         {/* Dettagli gruppo e categorie personalizzate (solo se il gruppo è aperto) */}
-        {!isClosed && (
+        {canEdit && (
           <>
             <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
 
@@ -661,7 +678,7 @@ export function GroupSettingsModal({
 
         {/* Membri attivi */}
         <div className="field">
-          {creatorControls && !isClosed ? (
+          {creatorControls && canEdit ? (
             <ParticipantManager
               group={group}
               members={members}
@@ -694,6 +711,7 @@ export function GroupSettingsModal({
                             (isEvent
                               ? 'Partecipante senza accesso · '
                               : 'Nome da scegliere nell’invito · ')}
+                          {m.ownerId && m.accessRole === 'viewer' && 'Solo visualizzazione · '}
                           Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
                         </div>
                       </div>
@@ -703,7 +721,7 @@ export function GroupSettingsModal({
               </div>
             </>
           )}
-          {!isClosed && !isEvent && (
+          {canEdit && !isEvent && (
             <form
               className="form-stack"
               onSubmit={async (event) => {
@@ -746,7 +764,7 @@ export function GroupSettingsModal({
           )}
         </div>
 
-        {!isClosed && (
+        {canEdit && (
           <>
             <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
 
@@ -762,7 +780,7 @@ export function GroupSettingsModal({
 
         <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
 
-        {creatorControls && (
+        {!readOnly && creatorControls && (
           <PersonalGroupDeletion
             group={group}
             controls={creatorControls}
@@ -794,17 +812,25 @@ export function GroupSettingsModal({
             {activeMembers.length <= 1 ? (
               <p className="field-hint">
                 Sei l’ultimo partecipante attivo. Per conservare le spese e lo storico,{' '}
-                {isClosed ? 'lascia il gruppo in archivio.' : 'usa la chiusura del gruppo.'}
+                {isClosed
+                  ? 'lascia il gruppo in archivio.'
+                  : readOnly
+                    ? 'non è possibile lasciare vuoto il gruppo.'
+                    : 'usa la chiusura del gruppo.'}
               </p>
             ) : confirmLeave ? (
               <div className="creator-confirm">
                 <strong>Uscire da «{group.name}»?</strong>
-                {activeMembers.every((m) => m.userId === currentUserId || !m.ownerId) && (
+                {(otherOwners.length === 0 || lastEditor) && (
                   <p>
-                    Non resterà nessuno con accesso.{' '}
-                    {group.inviteEnabled && !isClosed
-                      ? 'Conserva il link attuale prima di uscire per poter rientrare.'
-                      : 'Senza un invito attivo non potrai rientrare. Puoi invece conservare il conto in archivio.'}
+                    {otherOwners.length === 0
+                      ? 'Non resterà nessuno con accesso.'
+                      : 'Resteranno solo partecipanti in visualizzazione: nessuno potrà gestire gli inviti.'}{' '}
+                    {isClosed
+                      ? 'Il gruppo è chiuso: non potrai rientrare con un invito finché non verrà riaperto.'
+                      : lastEditor
+                        ? 'Per rientrare con modifica assicurati prima di avere un link «Con modifica» attivo.'
+                        : 'Per rientrare ti servirà un link d’invito attivo.'}
                   </p>
                 )}
                 <p>

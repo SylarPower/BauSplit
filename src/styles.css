@@ -1908,3 +1908,12 @@ textarea.input { height: auto; resize: vertical; }
 .creator-confirm { display: grid; gap: 8px; margin: 6px 0; background: var(--surface-subtle); border-radius: var(--radius-sm); padding: 12px; font-size: 14px; overflow-wrap: anywhere; }
 .creator-confirm .btn { min-height: 44px; }
 .creator-summary { cursor: pointer; font-size: 14px; padding-block: 10px; }
+
+/* Le due credenziali hanno etichetta e azioni proprie, anche su telefono. */
+.invite-permission { display: grid; gap: 8px; padding: 14px; min-width: 0; }
+.invite-permission h3 { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.invite-permission > .field-hint { color: var(--text-secondary); font-size: 13px; }
+.invite-permission .badge { justify-self: start; }
+.invite-permission details { border-top: 1px solid var(--border); padding-top: 6px; }
+.invite-permission summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.invite-permission details[open] summary { margin-bottom: 8px; }

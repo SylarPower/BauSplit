@@ -8,6 +8,7 @@ export const member = (
   userId,
   displayName,
   ownerId,
+  accessRole: 'editor',
   joinedAt: '2026-01-01',
   leftAt: null,
 });
@@ -24,8 +25,6 @@ export const group = (
   createdBy: 'a',
   createdAt: '2026-01-01',
   updatedAt: '2026-01-01',
-  inviteToken: 'segreto',
-  inviteEnabled: true,
   closedAt: null,
   closedBy: null,
   closedIntoGroupId: null,

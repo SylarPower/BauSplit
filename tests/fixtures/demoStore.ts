@@ -40,9 +40,11 @@ interface CustomCategory extends CategoryStyle {
   createdAt: string;
 }
 
+type DemoGroup = ExpenseGroup & { inviteToken: string; inviteEnabled: boolean };
+
 interface DemoDatabase {
   users: UserProfile[];
-  groups: ExpenseGroup[];
+  groups: DemoGroup[];
   members: Record<string, GroupMember[]>;
   customCategories: CustomCategory[];
   expenses: Expense[];
@@ -179,6 +181,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gCasa]: [
         {
           userId: 'demo-marco',
+          accessRole: 'editor',
           ownerId: 'demo-marco',
           displayName: 'Marco',
           joinedAt: '2026-09-01T09:15:00Z',
@@ -186,6 +189,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
         },
         {
           userId: 'demo-giulia',
+          accessRole: 'editor',
           ownerId: 'demo-giulia',
           displayName: 'Giulia',
           joinedAt: '2026-09-01T09:22:00Z',
@@ -195,6 +199,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gCinqueTerre]: [
         {
           userId: 'demo-marco',
+          accessRole: 'editor',
           ownerId: 'demo-marco',
           displayName: 'Marco',
           joinedAt: '2026-10-24T10:05:00Z',
@@ -202,6 +207,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
         },
         {
           userId: 'demo-giulia',
+          accessRole: 'editor',
           ownerId: 'demo-giulia',
           displayName: 'Giulia',
           joinedAt: '2026-10-24T10:00:00Z',
@@ -211,6 +217,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gLondra]: [
         {
           userId: 'demo-marco',
+          accessRole: 'editor',
           ownerId: 'demo-marco',
           displayName: 'Marco',
           joinedAt: '2026-10-10T18:12:00Z',
@@ -218,6 +225,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
         },
         {
           userId: 'demo-giulia',
+          accessRole: 'editor',
           ownerId: 'demo-giulia',
           displayName: 'Giulia',
           joinedAt: '2026-10-10T18:00:00Z',
@@ -225,6 +233,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
         },
         {
           userId: 'demo-luca',
+          accessRole: 'editor',
           ownerId: 'demo-luca',
           displayName: 'Luca',
           joinedAt: '2026-10-11T10:05:00Z',
@@ -234,6 +243,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
       [gGiappone]: [
         {
           userId: 'demo-giulia',
+          accessRole: 'editor',
           ownerId: 'demo-giulia',
           displayName: 'Giulia',
           joinedAt: '2026-11-10T12:00:00Z',
@@ -241,6 +251,7 @@ function buildInitialDemoDatabase(): DemoDatabase {
         },
         {
           userId: 'demo-luca',
+          accessRole: 'editor',
           ownerId: 'demo-luca',
           displayName: 'Luca',
           joinedAt: '2026-11-10T12:30:00Z',
@@ -871,12 +882,12 @@ export class DemoRepository {
     name: string;
     description: string;
     baseCurrency: string;
-  }): Promise<ExpenseGroup> {
+  }): Promise<DemoGroup> {
     const db = loadDb();
     const uid = this.getCurrentUserId();
     const user = db.users.find((u) => u.id === uid) ?? DEMO_USERS[0];
     const now = new Date().toISOString();
-    const group: ExpenseGroup = {
+    const group: DemoGroup = {
       id: makeId('grp'),
       name: params.name.trim().slice(0, 80),
       description: params.description.trim().slice(0, 280),
@@ -896,6 +907,7 @@ export class DemoRepository {
     db.members[group.id] = [
       {
         userId: user.id,
+        accessRole: 'editor',
         ownerId: user.id,
         displayName: user.displayName,
         joinedAt: now,
@@ -1218,6 +1230,7 @@ export class DemoRepository {
     } else {
       list.push({
         userId: user.id,
+        accessRole: 'editor',
         ownerId: user.id,
         displayName: user.displayName,
         joinedAt: now,

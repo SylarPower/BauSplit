@@ -5,6 +5,8 @@ import {
   ArrowLeftRight,
   BarChart3,
   History,
+  Info,
+  Eye,
   Plus,
   Receipt,
   Repeat,
@@ -24,6 +26,7 @@ import {
   type ExchangeRateResult,
 } from '../lib/currencies';
 import type { DataRepository } from '../lib/repository';
+import { groupRoleFor } from '../lib/groupAccess';
 import { processDueRecurringExpenses } from '../lib/repository';
 import { advanceRecurringDate } from '../lib/recurring';
 import { formatFullDateIT, todayISO } from '../lib/dates';
@@ -88,6 +91,12 @@ export function GroupView({
   const { group, members, categories, expenses, settlements, recurringExpenses, activityLogs } =
     data;
   const isClosed = group.closedAt !== null;
+  const isEditor = groupRoleFor(members, actorId) === 'editor';
+  const canEdit = isEditor && !isClosed;
+  const writableGroups = useMemo(
+    () => allGroups.filter((g) => groupRoleFor(g.members, actorId) === 'editor'),
+    [allGroups, actorId]
+  );
   const isEvent = !!group.quickCreatorSeat;
   const [addingPeople, setAddingPeople] = useState(false);
 
@@ -498,7 +507,7 @@ export function GroupView({
             </button>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {!isClosed && (
+              {canEdit && (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -515,10 +524,10 @@ export function GroupView({
                   setSettingsFocusClose(false);
                   setSettingsOpen(true);
                 }}
-                aria-label="Impostazioni del gruppo"
-                title="Impostazioni del gruppo"
+                aria-label={isEditor ? 'Impostazioni del gruppo' : 'Dettagli del gruppo'}
+                title={isEditor ? 'Impostazioni del gruppo' : 'Dettagli del gruppo'}
               >
-                <Settings size={18} />
+                {isEditor ? <Settings size={18} /> : <Info size={18} />}
               </button>
             </div>
           </div>
@@ -528,6 +537,7 @@ export function GroupView({
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                 <h1 className="page-title">{group.name}</h1>
                 <span className="badge">{group.baseCurrency}</span>
+                {!isEditor && <span className="badge"><Eye size={13} /> Solo visualizzazione</span>}
                 {isEvent && <span className="badge badge-accent">Serata</span>}
                 {isClosed && <span className="badge badge-warning">{isEvent ? 'Archiviata' : 'Gruppo chiuso'}</span>}
               </div>
@@ -552,7 +562,7 @@ export function GroupView({
                   ))}
                 </span>
                 <span>{activeMembers.map((m) => m.displayName).join(', ')}</span>
-                {!isClosed && !isEvent && activeMembers.length === 1 && (
+                {canEdit && !isEvent && activeMembers.length === 1 && (
                   <button
                     type="button"
                     className="link-btn"
@@ -565,7 +575,7 @@ export function GroupView({
               </div>
             </div>
 
-            {!isClosed && (
+            {canEdit && (
               <button
                 type="button"
                 className="btn btn-primary desktop-add-expense"
@@ -580,7 +590,7 @@ export function GroupView({
 
         {isEvent && (
           <div className="quick-event-actions" role="group" aria-label="Azioni della serata">
-            {!isClosed && group.quickCreatorSeat === currentUserId && (
+            {canEdit && group.quickCreatorSeat === currentUserId && (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAddingPeople(true)}>
                 <UserPlus size={15} /> Aggiungi persone
               </button>
@@ -589,7 +599,7 @@ export function GroupView({
               text={quickSummary(data, transfers)}
               onCopied={() => onToast('Riepilogo copiato, pronto per la chat')}
             />
-            {!isClosed && (
+            {canEdit && (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
                 setSettingsFocusClose(true);
                 setSettingsOpen(true);
@@ -599,7 +609,7 @@ export function GroupView({
             )}
           </div>
         )}
-        {addingPeople && !isClosed && (
+        {addingPeople && canEdit && (
           <QuickEventForm
             mode="add"
             groups={allGroups}
@@ -653,14 +663,11 @@ export function GroupView({
                 )}
               </span>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => void handleReopenGroup()}
-            >
-              <ArchiveRestore size={14} />
-              Riapri
-            </button>
+            {isEditor && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleReopenGroup()}>
+                <ArchiveRestore size={14} /> Riapri
+              </button>
+            )}
           </div>
         )}
 
@@ -686,7 +693,7 @@ export function GroupView({
           </div>
 
           <div className="summary-actions">
-            {!isClosed && myPrimaryTransfer && (
+            {canEdit && myPrimaryTransfer && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -735,7 +742,7 @@ export function GroupView({
         {tab === 'expenses' && (
           <ExpensesTab
             groupName={group.name}
-            isClosed={isClosed}
+            canEdit={canEdit}
             baseCurrency={group.baseCurrency}
             currentUserId={currentUserId}
             members={members}
@@ -764,7 +771,7 @@ export function GroupView({
         {tab === 'balances' && (
           <BalancesTab
             isEvent={isEvent}
-            isClosed={isClosed}
+            canEdit={canEdit}
             baseCurrency={group.baseCurrency}
             displayCurrency={displayCurrency}
             onDisplayCurrencyChange={setDisplayCurrency}
@@ -807,7 +814,7 @@ export function GroupView({
         {tab === 'recurring' && (
           <RecurringTab
             groupId={group.id}
-            isClosed={isClosed}
+            canEdit={canEdit}
             baseCurrency={group.baseCurrency}
             currentUserId={currentUserId}
             members={members}
@@ -826,7 +833,7 @@ export function GroupView({
       </div>
 
       {/* Bottone mobile rapido "+ Spesa" */}
-      {!isClosed && (
+      {canEdit && (
         <button type="button" className="mobile-fab" onClick={openNewExpense}>
           <Plus size={19} strokeWidth={2.4} />
           Spesa
@@ -854,7 +861,7 @@ export function GroupView({
       {/* Modali */}
       <ExpenseFormModal
         allowRecurring={!isEvent}
-        open={expenseModalOpen}
+        open={canEdit && expenseModalOpen}
         onClose={() => {
           setExpenseModalOpen(false);
           setEditingExpense(null);
@@ -872,7 +879,7 @@ export function GroupView({
       />
 
       <SettlementFormModal
-        open={settlementModalOpen}
+        open={canEdit && settlementModalOpen}
         onClose={() => {
           setSettlementModalOpen(false);
           setEditingSettlement(null);
@@ -888,24 +895,20 @@ export function GroupView({
         onSave={handleSaveSettlement}
       />
 
-      <InviteModal
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        group={group}
-        onRegenerate={async () => {
-          await repo.regenerateInvite(group.id);
-          await onRefreshGroup();
-        }}
-        onToggleEnabled={async (enabled) => {
-          await repo.setInviteEnabled(group.id, enabled);
-          await onRefreshGroup();
-        }}
-        onToast={onToast}
-      />
+      {canEdit && inviteOpen && (
+        <InviteModal
+          group={group}
+          repo={repo}
+          revision={activityLogs.find((log) => log.entityType === 'invite' || log.entityType === 'member')?.id}
+          onClose={() => setInviteOpen(false)}
+          onToast={onToast}
+        />
+      )}
 
       <GroupSettingsModal
+        readOnly={!isEditor}
         creatorControls={
-          group.creatorOwnerId === actorId
+          isEditor && group.creatorOwnerId === actorId
             ? {
                 repo,
                 onChanged: onRefreshGroup,
@@ -923,7 +926,7 @@ export function GroupView({
         }}
         initialFocusClose={settingsFocusClose}
         group={group}
-        allGroups={allGroups}
+        allGroups={writableGroups}
         members={members}
         balances={balances}
         transfers={transfers}

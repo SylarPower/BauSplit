@@ -42,7 +42,16 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export type GroupRole = 'editor' | 'viewer';
+
+export interface GroupInvite {
+  role: GroupRole;
+  token: string;
+  enabled: boolean;
+}
+
 export interface GroupMember {
+  accessRole: GroupRole; // permesso di accesso, non cambia pagante, quote o saldo
   userId: string; // posto stabile nei conti del gruppo
   ownerId: string | null; // accesso ospite/account; null = nessun accesso
   displayName: string;
@@ -59,8 +68,6 @@ export interface ExpenseGroup {
   name: string;
   description: string;
   baseCurrency: string;
-  inviteToken: string;
-  inviteEnabled: boolean;
   closedAt: string | null;
   closedBy: string | null;
   closedIntoGroupId: string | null;
@@ -227,6 +234,8 @@ export interface GroupData {
 }
 
 export interface InvitePreview {
+  inviteRole?: GroupRole; // tipo del link, anche se chi lo apre è già membro
+  accessRole?: GroupRole; // permesso effettivo dopo l’accettazione
   valid: boolean;
   reason?: 'not_found' | 'disabled' | 'closed' | 'revoked';
   groupId?: string;

@@ -38,7 +38,7 @@ import { reviewSelection, ReviewParticipants } from './ReviewParticipants';
 
 interface RecurringTabProps {
   groupId: string;
-  isClosed: boolean;
+  canEdit: boolean;
   baseCurrency: string;
   currentUserId: string;
   members: GroupMember[];
@@ -54,7 +54,7 @@ interface RecurringTabProps {
 
 export function RecurringTab({
   groupId,
-  isClosed,
+  canEdit,
   baseCurrency,
   currentUserId,
   members,
@@ -292,10 +292,10 @@ export function RecurringTab({
         <div>
           <h2 className="section-title">Spese ricorrenti</h2>
           <p className="field-hint">
-            Affitto, bollette e abbonamenti vengono registrati in automatico alla data prevista.
+            Le scadenze maturate vengono registrate quando una persona con permesso di modifica apre il gruppo.
           </p>
         </div>
-        {!isClosed && (
+        {canEdit && (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -317,11 +317,11 @@ export function RecurringTab({
           </span>
           <h3 className="empty-title">Nessuna spesa ricorrente</h3>
           <p className="empty-desc">
-            {isClosed
-              ? 'Questo gruppo non aveva spese ricorrenti impostate.'
+            {!canEdit
+              ? 'Non ci sono ricorrenze da visualizzare.'
               : 'Aggiungi spese fisse come affitto, internet, luce o abbonamenti condivisi per non doverle inserire ogni mese.'}
           </p>
-          {!isClosed && (
+          {canEdit && (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -399,10 +399,10 @@ export function RecurringTab({
 
                 {needsReview && (
                   <p className="field-hint">
-                    Modifica pagante e quote: questa ricorrenza include un ex partecipante.
+                    {canEdit ? 'Modifica pagante e quote: questa ricorrenza include un ex partecipante.' : 'Questa ricorrenza include un ex partecipante.'}
                   </p>
                 )}
-                {confirmDeleteId === rec.id ? (
+                {canEdit && confirmDeleteId === rec.id ? (
                   <div
                     className="alert alert-error"
                     style={{
@@ -437,7 +437,7 @@ export function RecurringTab({
                       </button>
                     </div>
                   </div>
-                ) : !isClosed ? (
+                ) : canEdit ? (
                   <div
                     style={{
                       display: 'flex',
@@ -498,7 +498,7 @@ export function RecurringTab({
 
       {/* Modale creazione / modifica ricorrenza */}
       <Modal
-        open={modalOpen}
+        open={canEdit && modalOpen}
         title={editing ? 'Modifica spesa ricorrente' : 'Nuova spesa ricorrente'}
         onClose={() => {
           setModalOpen(false);

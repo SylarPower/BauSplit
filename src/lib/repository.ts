@@ -1,3 +1,4 @@
+import { groupRoleFor } from './groupAccess';
 import { simplifyEventDebts } from './quickEvent';
 import type {
   ActivityChanges,
@@ -16,6 +17,8 @@ import type {
   ExpenseSplit,
   GroupData,
   GroupMember,
+  GroupInvite,
+  GroupRole,
   GroupOverview,
   InvitePreview,
   RecurringExpense,
@@ -93,8 +96,9 @@ export interface DataRepository extends CreatorRepository {
   addParticipant(groupId: string, name: string): Promise<void>;
   getInvitePreview(token: string): Promise<InvitePreview>;
   acceptInvite(token: string, choice: InviteChoice): Promise<string>;
-  regenerateInvite(groupId: string): Promise<string>;
-  setInviteEnabled(groupId: string, enabled: boolean): Promise<boolean>;
+  getGroupInvites(groupId: string): Promise<GroupInvite[]>;
+  regenerateInvite(groupId: string, role: GroupRole): Promise<string>;
+  setInviteEnabled(groupId: string, enabled: boolean, role: GroupRole): Promise<boolean>;
 
   getGroupData(groupId: string): Promise<GroupData>;
 
@@ -216,6 +220,7 @@ export async function processDueRecurringExpenses(params: {
 }): Promise<number> {
   const { repo, actorId, data, onlyRecurringId, forceSingleOccurrence = false } = params;
   if (data.group.closedAt !== null || data.group.quickCreatorSeat) return 0;
+  if (groupRoleFor(data.members, actorId) !== 'editor') return 0;
   const today = todayISO();
   const activeMembers = data.members.filter((m) => m.leftAt === null);
   const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
@@ -377,8 +382,6 @@ function mapGroup(row: Record<string, unknown>): ExpenseGroup {
     name: String(row.name ?? ''),
     description: String(row.description ?? ''),
     baseCurrency: String(row.base_currency ?? 'EUR'),
-    inviteToken: String(row.invite_token ?? ''),
-    inviteEnabled: Boolean(row.invite_enabled),
     closedAt: row.closed_at ? String(row.closed_at) : null,
     closedBy: row.closed_by ? String(row.closed_by) : null,
     closedIntoGroupId: row.closed_into_group_id ? String(row.closed_into_group_id) : null,
@@ -399,12 +402,15 @@ function mapMember(row: {
   joined_at: string;
   left_at: string | null;
   removed_at?: string | null;
+  access_role?: string;
   profiles: DisplayProfile | DisplayProfile[] | null;
 }): GroupMember {
   const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
   return {
     userId: row.user_id,
     ownerId: row.owner_id,
+    // Nello schema precedente non esistevano inviti in sola lettura.
+    accessRole: row.access_role === undefined || row.access_role === 'editor' ? 'editor' : 'viewer',
     displayName: row.display_name ?? profile?.display_name ?? 'Membro',
     joinedAt: row.joined_at,
     leftAt: row.left_at,
@@ -775,6 +781,8 @@ export class SupabaseRepository implements DataRepository {
     }
     return {
       valid: true,
+      inviteRole: raw.invite_role === 'viewer' ? 'viewer' : 'editor',
+      accessRole: raw.access_role === 'viewer' ? 'viewer' : 'editor',
       groupId: String(raw.group_id),
       groupName: String(raw.group_name ?? ''),
       description: String(raw.description ?? ''),
@@ -797,18 +805,37 @@ export class SupabaseRepository implements DataRepository {
     return String(data);
   }
 
-  async regenerateInvite(groupId: string): Promise<string> {
+  async getGroupInvites(groupId: string): Promise<GroupInvite[]> {
+    const { data, error } = await this.client.rpc('get_group_invites', { p_group_id: groupId });
+    if (error?.code === 'PGRST202') {
+      // SQL non ancora aggiornato: il vecchio token è SOLO con modifica.
+      const old = await this.client
+        .from('expense_groups')
+        .select('invite_token,invite_enabled')
+        .eq('id', groupId)
+        .single();
+      if (old.error) throw old.error;
+      return [{ role: 'editor', token: old.data.invite_token, enabled: old.data.invite_enabled }];
+    }
+    if (error) throw error;
+    return (data as { access_role: GroupRole; token: string; enabled: boolean }[])
+      .map(({ access_role: role, token, enabled }) => ({ role, token, enabled }));
+  }
+
+  async regenerateInvite(groupId: string, role: GroupRole): Promise<string> {
     const { data, error } = await this.client.rpc('regenerate_group_invite', {
       p_group_id: groupId,
+      ...(role === 'editor' ? {} : { p_role: role }),
     });
     if (error) throw error;
     return String(data);
   }
 
-  async setInviteEnabled(groupId: string, enabled: boolean): Promise<boolean> {
+  async setInviteEnabled(groupId: string, enabled: boolean, role: GroupRole): Promise<boolean> {
     const { data, error } = await this.client.rpc('set_group_invite_enabled', {
       p_group_id: groupId,
       p_enabled: enabled,
+      ...(role === 'editor' ? {} : { p_role: role }),
     });
     if (error) throw error;
     return Boolean(data);

@@ -59,7 +59,7 @@ export const DEFAULT_EXPENSE_FILTERS: ExpenseFilters = {
 
 interface ExpensesTabProps {
   groupName: string;
-  isClosed: boolean;
+  canEdit: boolean;
   baseCurrency: string;
   currentUserId: string;
   members: GroupMember[];
@@ -83,7 +83,7 @@ type FeedItem =
 
 export function ExpensesTab({
   groupName,
-  isClosed,
+  canEdit,
   baseCurrency,
   currentUserId,
   members,
@@ -547,11 +547,11 @@ export function ExpensesTab({
           </span>
           <h3 className="empty-title">Ancora nessuna spesa</h3>
           <p className="empty-desc">
-            {isClosed
-              ? 'Questo gruppo è stato chiuso senza movimenti registrati.'
+            {!canEdit
+              ? 'Non ci sono movimenti da consultare.'
               : 'Aggiungi la prima spesa del gruppo: potrai dividerla in parti uguali, per importi o per percentuali.'}
           </p>
-          {!isClosed && (
+          {canEdit && (
             <button
               type="button"
               className="btn btn-primary"
@@ -784,7 +784,7 @@ export function ExpensesTab({
         wide
         footerBetween
         footer={
-          selectedExpense && !isClosed ? (
+          selectedExpense && canEdit ? (
             <>
               <button
                 type="button"
@@ -815,7 +815,7 @@ export function ExpensesTab({
       >
         {selectedExpense && (
           <div className="form-stack">
-            {confirmDelete && (
+            {canEdit && confirmDelete && (
               <div className="alert alert-error" style={{ flexDirection: 'column', gap: 8 }}>
                 <span>
                   Eliminare la spesa &ldquo;{selectedExpense.description}&rdquo;? I saldi verranno
@@ -978,7 +978,7 @@ export function ExpensesTab({
         }}
         footerBetween
         footer={
-          selectedSettlement && !isClosed && selectedSettlement.kind === 'settlement' ? (
+          selectedSettlement && canEdit && selectedSettlement.kind === 'settlement' ? (
             <>
               <button
                 type="button"
@@ -1007,7 +1007,7 @@ export function ExpensesTab({
       >
         {selectedSettlement && (
           <div className="form-stack">
-            {confirmDelete && (
+            {canEdit && confirmDelete && (
               <div className="alert alert-error" style={{ flexDirection: 'column', gap: 8 }}>
                 <span>
                   Eliminare questo rimborso? I saldi del gruppo verranno ricalcolati e l&apos;azione

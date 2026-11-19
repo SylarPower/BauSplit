@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readDeviceGroups, saveDeviceGroups, type DeviceGroup } from '../lib/deviceGroups';
+import { groupRoleFor } from '../lib/groupAccess';
 import { processDueRecurringExpenses, SupabaseRepository } from '../lib/repository';
 import {
   clearPendingInviteToken,
@@ -144,7 +145,7 @@ export function Workspace({
       try {
         let result = await repo.getGroupData(id);
         if (request !== groupRequest.current) return;
-        if (checkDue) {
+        if (checkDue && groupRoleFor(result.members, uid) === 'editor') {
           const n = await processDueRecurringExpenses({ repo, actorId: uid, data: result });
           if (n) {
             result = await repo.getGroupData(id);
@@ -294,7 +295,11 @@ export function Workspace({
               dismissInvite();
               setGroupId(id);
               void loadHome();
-              showToast('Invito accettato! Sei nel gruppo.');
+              showToast(
+                preview?.preview?.accessRole === 'viewer'
+                  ? 'Sei nel gruppo in sola visualizzazione.'
+                  : 'Invito accettato! Sei nel gruppo.'
+              );
             }}
             onDeclineInvite={dismissInvite}
             onToast={showToast}
