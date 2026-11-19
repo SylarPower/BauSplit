@@ -216,7 +216,10 @@ it('prima dell’aggiornamento SQL non presenta mai il vecchio URL come link in 
   expect(screen.getByDisplayValue('https://esempio.test/?invito=vecchio')).toBeTruthy();
 });
 
-it('anteprima e accettazione spiegano il permesso prima di scegliere il posto; il ruolo non viene inviato dal client', async () => {
+it.each([
+  ['viewer', 'Solo visualizzazione', 'Accetta in sola visualizzazione'],
+  ['editor', 'Invito con modifica', 'Accetta ed entra nel gruppo'],
+] as const)('l’invito %s mostra prima il permesso e non invia il ruolo dal client', async (role, label, action) => {
   const onAcceptInvite = vi.fn().mockResolvedValue(undefined);
   render(
     <GroupsHomeView
@@ -235,8 +238,8 @@ it('anteprima e accettazione spiegano il permesso prima di scegliere il posto; i
           valid: true,
           groupId: 'ev',
           groupName: 'Casa',
-          inviteRole: 'viewer',
-          accessRole: 'viewer',
+          inviteRole: role,
+          accessRole: role,
           memberCount: 2,
           availableNames: [{ id: 's', name: 'Sara' }],
         },
@@ -253,11 +256,12 @@ it('anteprima e accettazione spiegano il permesso prima di scegliere il posto; i
     />
   );
   const card = within(screen.getByRole('region', { name: 'Invito a un gruppo' }));
-  expect(card.getByText('Solo visualizzazione')).toBeTruthy();
-  expect(card.getByText(/il tuo saldo/)).toBeTruthy();
+  expect(card.getByText('Il branco ti aspetta')).toBeTruthy();
+  expect(card.getByText(label)).toBeTruthy();
+  if (role === 'viewer') expect(card.getByText(/il tuo saldo/)).toBeTruthy();
   expect(onAcceptInvite).not.toHaveBeenCalled();
   fireEvent.change(card.getByRole('combobox'), { target: { value: 's' } });
-  fireEvent.click(card.getByRole('button', { name: 'Accetta in sola visualizzazione' }));
+  fireEvent.click(card.getByRole('button', { name: action }));
   await waitFor(() => expect(onAcceptInvite).toHaveBeenCalledWith('lettura', { memberId: 's' }));
 });
 

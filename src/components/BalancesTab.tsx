@@ -1,4 +1,4 @@
-import { Archive, ArrowLeftRight, ArrowRight, CheckCircle2, Pencil } from 'lucide-react';
+import { Archive, ArrowLeftRight, ArrowRight, PawPrint, Pencil } from 'lucide-react';
 import { roundCurrency } from '../lib/accounting';
 import {
   CURRENCIES,
@@ -153,13 +153,12 @@ export function BalancesTab({
 
         {transfers.length === 0 ? (
           <div className="card empty-state" style={{ padding: '32px 20px' }}>
-            <span
-              className="empty-icon"
-              style={{ background: 'var(--positive-soft)', color: 'var(--positive)' }}
-            >
-              <CheckCircle2 size={22} />
-            </span>
-            <h3 className="empty-title">Tutto in pari</h3>
+            <h3 className="empty-title settled-heading">
+              <span className="settled-paw">
+                <PawPrint size={18} aria-hidden="true" />
+              </span>
+              Tutto in pari
+            </h3>
             <p className="empty-desc">
               Non ci sono importi in sospeso tra i membri di questo gruppo.
             </p>
@@ -224,7 +223,7 @@ export function BalancesTab({
                 style={{
                   padding: '11px 18px',
                   borderTop: '1px solid var(--border)',
-                  background: 'var(--bg-subtle)',
+                  background: 'var(--surface-subtle)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',

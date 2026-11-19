@@ -701,7 +701,7 @@ export function ExpensesTab({
                   >
                     <CategoryIcon
                       icon={isTransfer ? 'transfer' : 'settlement'}
-                      color={isTransfer ? '#0b6e66' : '#0d7a5f'}
+                      color={isTransfer ? 'var(--accent)' : 'var(--positive)'}
                       boxed
                     />
 

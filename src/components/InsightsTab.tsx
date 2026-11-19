@@ -15,7 +15,7 @@ import type {
   GroupMember,
   Settlement,
 } from '../types';
-import { Avatar, CategoryIcon } from './Icon';
+import { Avatar, CategoryIcon, categoryStyle } from './Icon';
 
 interface InsightsTabProps {
   baseCurrency: string;
@@ -66,7 +66,9 @@ function CategoryDonut({
                   cy={size / 2}
                   r={radius}
                   fill="none"
-                  stroke={cat.color}
+                  className="category-paint"
+                  style={categoryStyle(cat.color)}
+                  stroke="currentColor"
                   strokeWidth={strokeWidth}
                   strokeDasharray={`${dash} ${circumference - dash}`}
                   strokeDashoffset={offset}
@@ -307,11 +309,8 @@ export function InsightsTab({
                     </div>
                     <div className="progress-track">
                       <div
-                        className="progress-fill"
-                        style={{
-                          width: `${Math.max(2, cat.percentage)}%`,
-                          backgroundColor: cat.color,
-                        }}
+                        className="progress-fill category-paint"
+                        style={{ ...categoryStyle(cat.color), width: `${Math.max(2, cat.percentage)}%` }}
                       />
                     </div>
                   </button>
@@ -386,7 +385,7 @@ export function InsightsTab({
                         className="progress-fill"
                         style={{
                           width: `${m.sharePercentage}%`,
-                          backgroundColor: '#64748b',
+                          backgroundColor: 'var(--chart-secondary)',
                         }}
                       />
                     </div>

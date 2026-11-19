@@ -2,6 +2,7 @@ import { LogOut } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { supabase, translateErrorIT } from '../lib/supabase';
 import type { UserProfile } from '../types';
+import { AppearanceSettings } from './AppearanceSettings';
 import { Avatar } from './Icon';
 import { Modal } from './Modal';
 
@@ -120,6 +121,8 @@ export function ProfileModal({
             </div>
           </div>
         </div>
+
+        <AppearanceSettings />
 
         {isGuest && <p className="field-hint">Questo browser ricorda i tuoi gruppi. Collegali a un account prima di cambiare dispositivo o cancellare i dati del sito.</p>}
         <form className="form-stack" onSubmit={handleSaveName}>

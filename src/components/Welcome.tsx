@@ -128,14 +128,13 @@ export function Welcome({
           </div>
           <figure className="welcome-art">
             <img
+              className="companion-art"
               src="./compagno.webp"
               alt="Un terrier con un fazzoletto verde porta uno scontrino."
               width="900"
               height="675"
             />
-            <figcaption>
-              <span /> FIG. 01 <b>·</b> IL COMPAGNO DI CONTI <span />
-            </figcaption>
+            <figcaption>IL COMPAGNO DI CONTI</figcaption>
           </figure>
         </section>
         <section id="come-funziona" aria-labelledby="steps-title" className="welcome-steps">

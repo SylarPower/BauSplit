@@ -26,6 +26,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
+import type { CSSProperties } from 'react';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   'shopping-basket': ShoppingBasket,
@@ -55,6 +56,11 @@ const ICON_MAP: Record<string, LucideIcon> = {
   transfer: FolderSync,
 };
 
+/** Colore salvato dal gruppo: solo la resa a schermo dipende dal tema. */
+export function categoryStyle(color: string) {
+  return { '--category-color': color } as CSSProperties;
+}
+
 export function CategoryIcon({
   icon,
   color,
@@ -68,15 +74,12 @@ export function CategoryIcon({
 }) {
   const Comp = ICON_MAP[icon] ?? Tag;
   if (!boxed) {
-    return <Comp size={size} style={{ color }} strokeWidth={1.9} />;
+    return <Comp size={size} className="category-paint" style={categoryStyle(color)} strokeWidth={1.9} />;
   }
   return (
     <span
-      className="cat-icon-box"
-      style={{
-        backgroundColor: `${color}14`,
-        color,
-      }}
+      className="cat-icon-box category-paint"
+      style={categoryStyle(color)}
       aria-hidden="true"
     >
       <Comp size={size} strokeWidth={1.9} />
@@ -127,9 +130,9 @@ export function Avatar({
         width: size,
         height: size,
         fontSize: Math.max(11, Math.round(size * 0.39)),
-        backgroundColor: palette.bg,
-        color: palette.fg,
-      }}
+        '--avatar-bg': palette.bg,
+        '--avatar-ink': palette.fg,
+      } as CSSProperties}
     >
       {getInitials(name)}
     </span>
