@@ -99,6 +99,7 @@ it.each([
       ],
       currentUserId: 'a',
       categories: catalog,
+      expenses: [],
       editingExpense: null,
       onSaveExpense: vi.fn(),
       onCreateRecurringWithOptionalFirst: vi.fn(),

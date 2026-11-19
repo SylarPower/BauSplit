@@ -44,6 +44,7 @@ const expenseProps = {
   ...common,
   open: true,
   onClose: vi.fn(),
+  expenses: [],
   editingExpense: null,
   onAddCustomCategory: vi.fn(),
   onSaveExpense: vi.fn(),

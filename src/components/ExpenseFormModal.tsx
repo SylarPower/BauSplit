@@ -1,11 +1,12 @@
-import { Check, Plus, RefreshCw, Repeat } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Check, History, Plus, RefreshCw, Repeat } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   computeExpenseSplits,
   convertToBaseAmount,
   roundCurrency,
 } from '../lib/accounting';
 import { DEFAULT_CATEGORY_COLOR, entryCategories } from '../lib/categories';
+import { buildCategoryHistory, suggestCategoryKey } from '../lib/categorySuggestion';
 import {
   CURRENCIES,
   formatMoney,
@@ -48,6 +49,7 @@ interface ExpenseFormModalProps {
   members: GroupMember[];
   currentUserId: string;
   categories: CategoryOption[];
+  expenses: Expense[];
   editingExpense: Expense | null;
   onSaveExpense: (input: ExpenseInput, before?: Expense) => Promise<void>;
   onCreateRecurringWithOptionalFirst: (params: {
@@ -67,6 +69,7 @@ export function ExpenseFormModal({
   members,
   currentUserId,
   categories: catalog,
+  expenses,
   editingExpense,
   onSaveExpense,
   onCreateRecurringWithOptionalFirst,
@@ -89,7 +92,8 @@ export function ExpenseFormModal({
   const [amountStr, setAmountStr] = useState('');
   const [currency, setCurrency] = useState(baseCurrency);
   const [expenseDate, setExpenseDate] = useState(todayISO());
-  const [categoryKey, setCategoryKey] = useState('spesa');
+  const [categoryChoice, setCategoryChoice] = useState({ key: '', automatic: false });
+  const suggestionId = useId();
   const [paidBy, setPaidBy] = useState(currentUserId);
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -126,7 +130,18 @@ export function ExpenseFormModal({
     () => entryCategories(catalog, editingExpense),
     [catalog, editingExpense]
   );
+  const history = useMemo(
+    () => (open && !editingExpense ? buildCategoryHistory(groupId, expenses, catalog) : []),
+    [open, editingExpense, groupId, expenses, catalog]
+  );
+  const suggestedKey = useMemo(
+    () => (categoryChoice.automatic ? suggestCategoryKey(description, history) : null),
+    [categoryChoice.automatic, description, history]
+  );
+  // La proposta è derivata, non scritta nella bozza: sparisce se cambia la descrizione.
+  const categoryKey = suggestedKey ?? categoryChoice.key;
   const selectedCategory = categories.find((c) => c.key === categoryKey);
+  const chooseCategory = (key: string) => setCategoryChoice({ key, automatic: false });
 
   // La sincronizzazione non deve resettare i campi già compilati.
   const initializedKeyRef = useRef<string | null>(null);
@@ -150,7 +165,7 @@ export function ExpenseFormModal({
       setAmountStr(formatDecimalInput(editingExpense.amount));
       setCurrency(editingExpense.currency);
       setExpenseDate(editingExpense.expenseDate);
-      setCategoryKey(editingExpense.category);
+      setCategoryChoice({ key: editingExpense.category, automatic: false });
       setPaidBy(editingExpense.paidBy);
       setSplitMode(editingExpense.splitMode);
       setSelectedIds(editingExpense.splits.map((s) => s.userId));
@@ -177,7 +192,7 @@ export function ExpenseFormModal({
       setAmountStr('');
       setCurrency(baseCurrency);
       setExpenseDate(today);
-      setCategoryKey(categories[0]?.key ?? '');
+      setCategoryChoice({ key: categories[0]?.key ?? '', automatic: true });
       setPaidBy(
         defaultIds.includes(currentUserId) ? currentUserId : (defaultIds[0] ?? currentUserId)
       );
@@ -354,7 +369,7 @@ export function ExpenseFormModal({
         icon: newCatIcon,
         color: newCatColor,
       });
-      setCategoryKey(created);
+      chooseCategory(created);
       setNewCatName('');
       setShowNewCat(false);
       onToast(`Categoria "${newCatName.trim()}" aggiunta`);
@@ -514,19 +529,31 @@ export function ExpenseFormModal({
           />
         )}
 
-        <label className="field">
-          <span className="field-label">Descrizione</span>
-          <input
-            type="text"
-            className="input"
-            placeholder="Es. Spesa supermercato, Cena pizzeria, Benzina"
-            maxLength={140}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            autoFocus
-            required
-          />
-        </label>
+        <div>
+          <label className="field">
+            <span className="field-label">Descrizione</span>
+            <input
+              type="text"
+              className="input"
+              placeholder="Es. Spesa supermercato, Cena pizzeria, Benzina"
+              maxLength={140}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              autoFocus
+              required
+            />
+          </label>
+          <p className="field-hint category-suggestion" id={suggestionId} role="status">
+            {suggestedKey && selectedCategory && (
+              <>
+                <History size={14} aria-hidden="true" />
+                <span>
+                  Categoria suggerita dallo storico: <strong>{selectedCategory.name}</strong>.
+                </span>
+              </>
+            )}
+          </p>
+        </div>
 
         <div className="field">
           <span className="field-label">Importo e valuta</span>
@@ -660,7 +687,8 @@ export function ExpenseFormModal({
               className="select"
               aria-label="Categoria"
               value={selectedCategory?.key ?? ''}
-              onChange={(e) => setCategoryKey(e.target.value)}
+              aria-describedby={suggestedKey ? suggestionId : undefined}
+              onChange={(e) => chooseCategory(e.target.value)}
             >
               {!selectedCategory && <option value="">Scegli una categoria</option>}
               {categories.map((c) => (
