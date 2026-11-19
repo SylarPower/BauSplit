@@ -15,7 +15,7 @@ import type {
 import { Avatar } from './Icon';
 
 interface BalancesTabProps {
-  isClosed: boolean;
+  canEdit: boolean;
   isEvent?: boolean;
   baseCurrency: string;
   displayCurrency: string;
@@ -34,7 +34,7 @@ interface BalancesTabProps {
 }
 
 export function BalancesTab({
-  isClosed,
+  canEdit,
   isEvent = false,
   baseCurrency,
   displayCurrency,
@@ -139,7 +139,7 @@ export function BalancesTab({
               Saldi compensati tra tutti i partecipanti per ridurre il numero di pagamenti.
             </p>
           </div>
-          {!isClosed && balances.length >= 2 && (
+          {canEdit && balances.length >= 2 && (
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -205,7 +205,7 @@ export function BalancesTab({
                     >
                       {formatDisplayAmount(tr.amount)}
                     </span>
-                    {!isClosed && (
+                    {canEdit && (
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
@@ -219,7 +219,7 @@ export function BalancesTab({
               );
             })}
 
-            {!isClosed && !isEvent && (
+            {canEdit && !isEvent && (
               <div
                 style={{
                   padding: '11px 18px',
@@ -406,7 +406,7 @@ export function BalancesTab({
                         </div>
                       )}
                     </div>
-                    {!isClosed && st.kind === 'settlement' && (
+                    {canEdit && st.kind === 'settlement' && (
                       <button
                         type="button"
                         className="btn-icon"

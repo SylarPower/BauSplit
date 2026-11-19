@@ -13,11 +13,23 @@ async function as(id: string) {
 async function first<T>(sql: string, params: unknown[] = []) {
   return (await db.query<T>(sql, params)).rows[0];
 }
+const invite = async (id: string, role: 'editor' | 'viewer') =>
+  (
+    await first<{ token: string }>('select token from get_group_invites($1) where access_role=$2', [
+      id,
+      role,
+    ])
+  ).token;
+const withInvites = async <G extends { id: string }>(group: G) => ({
+  ...group,
+  invite_token: await invite(group.id, 'editor'),
+  viewer_token: await invite(group.id, 'viewer'),
+});
 const createGroup = (name: string, participants: string[] = []) =>
-  first<{ id: string; invite_token: string }>(
-    "select * from create_expense_group($1,'','EUR',$2)",
-    [name, participants]
-  );
+  first<{ id: string }>("select * from create_expense_group($1,'','EUR',$2)", [
+    name,
+    participants,
+  ]).then(withInvites);
 const member = (id: string, owner: string) =>
   first<{ user_id: string; left_at: string | null }>(
     'select * from group_members where group_id=$1 and owner_id=$2',
@@ -437,10 +449,10 @@ describe('Catalogo categorie del gruppo', () => {
 
 type Person = { name: string; group_id?: string; user_id?: string };
 const quickEvent = (people: Person[] = [], currency = 'EUR') =>
-  first<{ id: string; invite_token: string; quick_creator_seat: string }>(
+  first<{ id: string; quick_creator_seat: string }>(
     "select * from create_quick_event('Cena di sabato',$1,$2)",
     [currency, JSON.stringify(people)]
-  );
+  ).then(withInvites);
 const addPeople = (g: string, people: Person[]) =>
   db.query('select add_quick_event_people($1,$2)', [g, JSON.stringify(people)]);
 const seatByName = (g: string, n: string) =>
@@ -831,12 +843,7 @@ describe('Poteri del creatore', () => {
       const toRevoke = await impact(g.id, sara);
       expect(toRevoke).toMatchObject({ mode: 'revoke', ownerId: friend, name: 'Sa' });
       await remove(g.id, sara, toRevoke);
-      const fresh = (
-        await first<{ invite_token: string }>(
-          'select invite_token from expense_groups where id=$1',
-          [g.id]
-        )
-      ).invite_token;
+      const fresh = await invite(g.id, 'editor');
       expect(fresh).not.toBe(g.invite_token);
       await as(outsider);
       expect((await preview(g.invite_token)).valid).toBe(false);
@@ -994,11 +1001,7 @@ describe('Poteri del creatore', () => {
     const original = (await member(g.id, account)).user_id;
     await as(guest);
     await remove(g.id, sara, await impact(g.id, sara));
-    const fresh = (
-      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
-        g.id,
-      ])
-    ).invite_token;
+    const fresh = await invite(g.id, 'editor');
     await as(friend);
     await db.query('select authorize_guest_link($1)', [account]);
     await as(account);
@@ -1009,11 +1012,7 @@ describe('Poteri del creatore', () => {
     await db.exec('reset role');
     await db.exec(schema);
     await as(guest);
-    const latest = (
-      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
-        g.id,
-      ])
-    ).invite_token;
+    const latest = await invite(g.id, 'editor');
     await as(account);
     await expect(join(latest, null)).rejects.toThrow(/autorizzare/);
     await as(guest);
@@ -1039,11 +1038,7 @@ describe('Poteri del creatore', () => {
     await db.query('select leave_group($1)', [g.id]);
     await as(guest);
     await remove(g.id, sara, await impact(g.id, sara));
-    const token = (
-      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
-        g.id,
-      ])
-    ).invite_token;
+    const token = await invite(g.id, 'editor');
     await as(friend);
     await expect(join(token, null)).rejects.toThrow(/autorizzare/);
     await as(guest);
@@ -1075,5 +1070,290 @@ describe('Poteri del creatore', () => {
     await as(outsider);
     expect((await preview(ev.invite_token)).available_names).toEqual([]);
     await expect(join(ev.invite_token, peer)).rejects.toThrow(/disponibile/);
+  });
+});
+
+describe('Inviti con modifica e in sola visualizzazione', () => {
+  it.each(['gruppo', 'serata'] as const)(
+    '%s: rivendicare un nome in lettura conserva le quote e non rivela le credenziali',
+    async (kind) => {
+      await as(guest);
+      const g = await newGroup(kind, ['Sara']);
+      const me = (await member(g.id, guest)).user_id;
+      const sara = (await seatByName(g.id, 'Sara')).user_id;
+      await eventExpense(g.id, 'Cena', 40, me, [me, sara]);
+      const splits = await tableRows('expense_splits', g.id);
+      expect(g.viewer_token).not.toBe(g.invite_token);
+
+      await as(friend);
+      const invitation = await preview(g.viewer_token);
+      expect(invitation).toMatchObject({
+        valid: true,
+        access_role: 'viewer',
+        available_names: [{ id: sara, name: 'Sara' }],
+      });
+      expect(JSON.stringify(invitation)).not.toContain(g.invite_token);
+      expect(await countGroups(g.id)).toBe(0);
+      expect(await tableRows('expenses', g.id)).toEqual([]);
+      await expect(invite(g.id, 'editor')).rejects.toThrow(/inviti/);
+      await join(g.viewer_token, sara);
+      expect(await member(g.id, friend)).toMatchObject({ user_id: sara, access_role: 'viewer' });
+      expect(await tableRows('expense_splits', g.id)).toEqual(splits);
+      expect(await tableRows('expenses', g.id)).toMatchObject([{ description: 'Cena' }]);
+      expect(await first('select name from expense_groups where id=$1', [g.id])).toMatchObject({
+        name: expect.any(String),
+      });
+      const row = await first('select * from expense_groups where id=$1', [g.id]);
+      expect(row).not.toHaveProperty('invite_token');
+      expect(JSON.stringify(row)).not.toContain(g.invite_token);
+      expect(await catalog(g.id)).toHaveLength(11);
+      expect(await tableRows('activity_logs', g.id)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ action: 'joined' })])
+      );
+      expect(JSON.stringify(await tableRows('activity_logs', g.id))).not.toContain(g.invite_token);
+      await expect(invite(g.id, 'editor')).rejects.toThrow(/inviti/);
+      await expect(db.query('select * from bausplit_private.group_invites')).rejects.toThrow(
+        /permission denied/
+      );
+      expect(
+        (
+          await db.query(
+            "select from pg_publication_tables where pubname='supabase_realtime' and tablename='group_invites'"
+          )
+        ).rows
+      ).toEqual([]);
+      // Un invito aperto da un membro già attivo non gli cambia ruolo o posto.
+      await join(g.invite_token, null, 'Altro');
+      expect(await preview(g.invite_token)).toMatchObject({
+        already_member: true,
+        access_role: 'viewer',
+        invite_role: 'editor',
+      });
+      await as(guest);
+      await join(g.viewer_token, null);
+      expect(await member(g.id, guest)).toMatchObject({ access_role: 'editor' });
+      await eventExpense(g.id, 'Taxi', 12, sara, [me, sara]);
+      await refund(g.id, sara, me, 14);
+      await as(friend);
+      expect(await tableRows('expenses', g.id)).toHaveLength(2);
+      expect(await tableRows('settlements', g.id)).toMatchObject([{ base_amount: '14.00' }]);
+      await as(outsider);
+      await join(g.viewer_token, null, 'Nuovo nome');
+      expect(await member(g.id, outsider)).toMatchObject({ access_role: 'viewer' });
+      expect(await tableRows('expense_splits', g.id)).toHaveLength(4);
+    }
+  );
+
+  it('RPC e scritture dirette: il lettore non cambia spese, quote, rimborsi, ricorrenze, categorie, membri, inviti, gruppo o storico', async () => {
+    await as(guest);
+    const g = await createGroup('Casa', ['Sara']);
+    const me = (await member(g.id, guest)).user_id,
+      sara = (await seatByName(g.id, 'Sara')).user_id;
+    await eventExpense(g.id, 'Cena', 40, me, [me, sara]);
+    const { id: expenseId } = await first<{ id: string }>(
+      'select id from expenses where group_id=$1',
+      [g.id]
+    );
+    await recurring(g.id, me, [sara]);
+    await refund(g.id, sara, me, 2);
+    const category = await saveCategory(g.id, null, 'Piscina');
+    const tables = [
+      'expenses',
+      'expense_splits',
+      'settlements',
+      'recurring_expenses',
+      'group_categories',
+      'activity_logs',
+    ];
+    await as(friend);
+    await join(g.viewer_token, sara);
+    const before = await Promise.all(tables.map((t) => tableRows(t, g.id)));
+    expect(before.every((rows) => rows.length > 0)).toBe(true);
+    const reads = await first(
+      'select is_active_group_member($1) as reads, can_edit_group($1) as writes',
+      [g.id]
+    );
+    expect(reads).toEqual({ reads: true, writes: false });
+    await expect(eventExpense(g.id, 'Nuova', 8, sara, [me, sara])).rejects.toThrow(
+      /visualizzazione/
+    );
+    await expect(
+      db.query(
+        `select save_expense($1,$2,'Altra',40,'EUR',1,current_date,false,40,current_date,'altro','Altro',$3,'equal','',$4,'updated','Altra')`,
+        [g.id, expenseId, sara, JSON.stringify([{ user_id: me, amount: 40, base_amount: 40 }])]
+      )
+    ).rejects.toThrow(/visualizzazione/);
+    await expect(db.query("select delete_expense($1,'Eliminata')", [expenseId])).rejects.toThrow(
+      /visualizzazione/
+    );
+    await expect(refund(g.id, sara, me, 18)).rejects.toThrow(/consentito|row-level security/);
+    await expect(recurring(g.id, sara, [me])).rejects.toThrow(/consentito|row-level security/);
+    await expect(
+      db.query(
+        "insert into activity_logs(group_id,actor_id,entity_type,action,summary) values ($1,auth.uid(),'group','updated','Nota')",
+        [g.id]
+      )
+    ).rejects.toThrow(/row-level security/);
+    for (const sql of [
+      "update expense_groups set name='Altro' where id=$1 returning id",
+      'update recurring_expenses set active=false where group_id=$1 returning id',
+      'delete from recurring_expenses where group_id=$1 returning id',
+      'update settlements set amount=5 where group_id=$1 returning id',
+      'delete from settlements where group_id=$1 returning id',
+    ])
+      expect((await db.query(sql, [g.id])).rows).toEqual([]);
+    for (const sql of [
+      "update group_members set access_role='editor' where group_id=$1",
+      'update expense_groups set creator_owner_id=auth.uid() where id=$1',
+      'delete from expenses where group_id=$1',
+      'delete from expense_splits where group_id=$1',
+      'delete from group_categories where group_id=$1',
+      'delete from activity_logs where group_id=$1',
+    ])
+      await expect(db.query(sql, [g.id])).rejects.toThrow(/permission denied/);
+    for (const [sql, params] of [
+      ["select add_group_participant($1,'Nome')", [g.id]],
+      ["select save_group_category($1,null,'Pista')", [g.id]],
+      ['select delete_group_category($1,$2)', [g.id, category]],
+      ['select move_group_category($1,$2,-1)', [g.id, category]],
+      ["select regenerate_group_invite($1,'viewer')", [g.id]],
+      ['select regenerate_group_invite($1)', [g.id]],
+      ["select set_group_invite_enabled($1,false,'viewer')", [g.id]],
+      ['select set_group_invite_enabled($1,false)', [g.id]],
+      ['select close_expense_group($1)', [g.id]],
+    ] as [string, unknown[]][])
+      await expect(db.query(sql, params)).rejects.toThrow(/visualizzazione/);
+    await expect(rename(g.id, me, 'Altro')).rejects.toThrow(/riservata/);
+    await expect(remove(g.id, me, {})).rejects.toThrow(/riservata/);
+    await expect(permit(g.id, me)).rejects.toThrow(/riservata/);
+    await expect(destroy(g.id, {})).rejects.toThrow(/riservata/);
+    expect(await Promise.all(tables.map((t) => tableRows(t, g.id)))).toEqual(before);
+    await as(guest);
+    expect(await invite(g.id, 'viewer')).toBe(g.viewer_token);
+    expect(await invite(g.id, 'editor')).toBe(g.invite_token);
+    // Il vincolo è del singolo gruppo, non dell'utente.
+    await as(friend);
+    const own = await createGroup('Mio conto');
+    const self = (await member(own.id, friend)).user_id;
+    await eventExpense(own.id, 'Pranzo', 8, self, [self]);
+    expect(await tableRows('expenses', own.id)).toHaveLength(1);
+    expect(await member(g.id, friend)).toMatchObject({ access_role: 'viewer' });
+  });
+
+  it('i link si gestiscono separatamente; revoca, rientro e archivio valgono per entrambi', async () => {
+    await as(guest);
+    const g = await createGroup('Cinema');
+    await db.query("select set_group_invite_enabled($1,false,'viewer')", [g.id]);
+    expect(await preview(g.viewer_token)).toEqual({ valid: false, reason: 'disabled' });
+    expect((await preview(g.invite_token)).valid).toBe(true);
+    const v2 = (
+      await first<{ token: string }>("select regenerate_group_invite($1,'viewer') token", [g.id])
+    ).token;
+    expect(await preview(g.viewer_token)).toEqual({ valid: false, reason: 'not_found' });
+    expect(await invite(g.id, 'editor')).toBe(g.invite_token);
+    await as(friend);
+    await join(v2, null, 'Sara');
+    const seat = (await member(g.id, friend)).user_id;
+    await db.query('select leave_group($1)', [g.id]);
+    expect(await countGroups(g.id)).toBe(0);
+    expect(await preview(v2)).toMatchObject({ returning_name: 'Sara', access_role: 'viewer' });
+    await join(v2, null);
+    expect(await member(g.id, friend)).toMatchObject({ user_id: seat, access_role: 'viewer' });
+    await as(guest);
+    await remove(g.id, seat, await impact(g.id, seat));
+    const v3 = await invite(g.id, 'viewer'),
+      e3 = await invite(g.id, 'editor');
+    await as(friend);
+    expect(await countGroups(g.id)).toBe(0);
+    for (const old of [g.invite_token, v2]) expect((await preview(old)).reason).toBe('not_found');
+    for (const fresh of [v3, e3]) {
+      expect((await preview(fresh)).reason).toBe('revoked');
+      await expect(join(fresh, null)).rejects.toThrow(/autorizzare/);
+    }
+    await as(guest);
+    await permit(g.id, seat);
+    await as(friend);
+    await join(e3, null); // esplicito rientro con nuovo permesso
+    expect(await member(g.id, friend)).toMatchObject({ user_id: seat, access_role: 'editor' });
+    await db.query("select add_group_participant($1,'Nina')", [g.id]);
+    await db.query('select leave_group($1)', [g.id]);
+    await join(v3, null);
+    expect(await member(g.id, friend)).toMatchObject({ user_id: seat, access_role: 'viewer' });
+    await as(guest);
+    await db.query('select close_expense_group($1)', [g.id]);
+    await as(friend);
+    expect(await countGroups(g.id)).toBe(1);
+    for (const token of [e3, v3]) expect((await preview(token)).reason).toBe('closed');
+    await expect(db.query('select reopen_expense_group($1)', [g.id])).rejects.toThrow(
+      /visualizzazione/
+    );
+    await as(guest);
+    await db.query('select reopen_expense_group($1)', [g.id]);
+    for (const token of [e3, v3]) expect((await preview(token)).reason).toBe('disabled');
+    await db.query("select set_group_invite_enabled($1,true,'viewer')", [g.id]);
+    await db.exec('reset role');
+    await db.exec(schema);
+    await as(guest);
+    expect(await invite(g.id, 'editor')).toBe(e3);
+    expect(await invite(g.id, 'viewer')).toBe(v3);
+    expect((await preview(e3)).reason).toBe('disabled');
+    expect((await preview(v3)).valid).toBe(true);
+    expect(await member(g.id, friend)).toMatchObject({ user_id: seat, access_role: 'viewer' });
+  });
+
+  it('il riporto richiede modifica anche nella destinazione; la serata resta consultabile senza comandi di gestione', async () => {
+    await as(guest);
+    const home = await createGroup('Coppia');
+    const partner = (await member(home.id, guest)).user_id;
+    await as(friend);
+    await join(home.viewer_token, null, 'Sara');
+    const ev = await quickEvent([{ name: 'Partner', group_id: home.id, user_id: partner }]);
+    const p = (await seatByName(ev.id, 'Partner')).user_id,
+      me = ev.quick_creator_seat;
+    await eventExpense(ev.id, 'Gita', 30, me, [me, p]);
+    expect(
+      await first('select group_id,can_carry from get_quick_event_matches($1)', [ev.id])
+    ).toEqual({ group_id: home.id, can_carry: false });
+    await expect(carryPair(ev.id, home.id, p, me, 15)).rejects.toThrow(/visualizzazione/);
+    await as(guest);
+    await join(ev.viewer_token, p);
+    await expect(addPeople(ev.id, [{ name: 'Altro' }])).rejects.toThrow(/Solo chi/);
+    await expect(carryPair(ev.id, home.id, p, me, 15)).rejects.toThrow(/visualizzazione/);
+    expect(await tableRows('settlements', home.id)).toHaveLength(0);
+    expect(await tableRows('settlements', ev.id)).toHaveLength(0);
+    expect(await first('select closed_at from expense_groups where id=$1', [ev.id])).toEqual({
+      closed_at: null,
+    });
+  });
+
+  it('collegando un account resta il ruolo del posto conservato; il creatore mantiene i suoi poteri', async () => {
+    await as(guest);
+    const solo = await createGroup('Casa'),
+      common = await createGroup('Gita');
+    await as(friend);
+    await join(solo.viewer_token, null, 'Sara');
+    const seat = (await member(solo.id, friend)).user_id;
+    await join(common.invite_token, null, 'Sara ospite');
+    const mine = await quickEvent();
+    await as(account);
+    await join(common.viewer_token, null, 'Sara account');
+    await join(mine.viewer_token, null, 'Secondo posto');
+    const retained = (await member(common.id, account)).user_id;
+    await as(friend);
+    await db.query('select authorize_guest_link($1)', [account]);
+    await as(account);
+    await db.query('select link_guest_groups($1)', [friend]);
+    expect(await member(solo.id, account)).toMatchObject({ user_id: seat, access_role: 'viewer' });
+    expect(await member(common.id, account)).toMatchObject({
+      user_id: retained,
+      access_role: 'viewer',
+    });
+    for (const g of [solo, common]) await expect(invite(g.id, 'editor')).rejects.toThrow(/inviti/);
+    expect(await member(mine.id, account)).toMatchObject({ access_role: 'editor' });
+    await addPeople(mine.id, [{ name: 'Giò' }]);
+    await as(friend);
+    expect(await countGroups(solo.id)).toBe(0);
+    await db.exec('reset role; set role anon');
+    await expect(invite(solo.id, 'viewer')).rejects.toThrow(/permission denied/);
   });
 });

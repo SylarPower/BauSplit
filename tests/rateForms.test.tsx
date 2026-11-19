@@ -22,6 +22,7 @@ const quote = (inverse: boolean) => `Tasso di cambio: 1 ${inverse ? 'EUR in JPY'
 const valueOf = (label: string) => (screen.getByLabelText(label) as HTMLInputElement).value;
 const members = ['Anna', 'Nina'].map((id) => ({
   userId: id,
+  accessRole: 'editor' as const,
   ownerId: id,
   displayName: id,
   joinedAt: '2026-01-01',
@@ -207,7 +208,7 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
     render(
       <RecurringTab
         {...common}
-        isClosed={false}
+        canEdit
         recurringExpenses={[]}
         nameOf={(s) => s}
         onSaveRecurring={save}
@@ -234,8 +235,6 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
       description: '',
       baseCurrency: 'JPY',
       closedAt: null,
-      inviteEnabled: true,
-      inviteToken: '',
       closedBy: null,
       closedIntoGroupId: null,
       quickCreatorSeat: null,

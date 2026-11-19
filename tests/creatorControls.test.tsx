@@ -160,7 +160,7 @@ it('le azioni sul posto sono locali; dopo una conferma obsoleta richiede una nuo
     new Error('I dati sono cambiati: ricontrolla la rimozione')
   );
   click('Rimuovi Sarina');
-  await screen.findByText(/Il vecchio link/);
+  await screen.findByText(/Entrambi i vecchi link/);
   expect(screen.getByText(/Ricorrenze che verranno/)).toBeTruthy();
   click('Conferma rimozione');
   expect((await screen.findByRole('alert')).textContent).toMatch(/cambiati/);

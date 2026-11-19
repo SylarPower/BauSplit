@@ -96,7 +96,12 @@ export function AcceptInviteForm({
           className="btn btn-primary"
           disabled={busy || (!preview.returningName && (!slot || (slot === 'new' && !name.trim())))}
         >
-          <Check size={16} /> {busy ? 'Accesso al gruppo…' : 'Accetta ed entra nel gruppo'}
+          <Check size={16} />{' '}
+          {busy
+            ? 'Accesso al gruppo…'
+            : preview.accessRole === 'viewer'
+              ? 'Accetta in sola visualizzazione'
+              : 'Accetta ed entra nel gruppo'}
         </button>
         <button className="btn btn-secondary" type="button" disabled={busy} onClick={onDecline}>
           <X size={15} /> Rifiuta

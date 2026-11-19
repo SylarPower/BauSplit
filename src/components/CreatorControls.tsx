@@ -64,9 +64,7 @@ export function ParticipantManager({
       } else if (action.kind === 'return') {
         await controls.repo.allowParticipantReturn(group.id, m.userId);
         message = m.ownerId
-          ? group.inviteEnabled
-            ? 'Nuovo invito autorizzato. Condividi il link attuale.'
-            : 'Rientro autorizzato. Riattiva gli inviti per condividere il link.'
+          ? 'Rientro autorizzato. Da Invita, condividi il link per il permesso che vuoi concedere.'
           : 'Partecipante reincluso nelle divisioni';
       } else {
         await controls.repo.removeParticipant(action.preview);
@@ -107,7 +105,9 @@ export function ParticipantManager({
                     ? 'Non attivo · può rientrare su invito'
                     : 'Posto storico'
                   : m.ownerId
-                    ? 'Ha accesso al gruppo'
+                    ? m.accessRole === 'viewer'
+                      ? 'Solo visualizzazione'
+                      : 'Può modificare il gruppo'
                     : 'Partecipa solo per nome'}
             </span>
           </div>
@@ -178,7 +178,7 @@ export function ParticipantManager({
             ) : chosen.kind === 'return' ? (
               <p>
                 {m.ownerId
-                  ? `${m.displayName} potrà rientrare sullo stesso posto solo accettando il link attuale. Confermi?`
+                  ? `${m.displayName} potrà rientrare sullo stesso posto solo accettando un nuovo invito. Confermi?`
                   : `${m.displayName} tornerà tra i partecipanti alle nuove spese, senza ricevere accesso. Confermi?`}
               </p>
             ) : (
@@ -204,8 +204,8 @@ export function ParticipantManager({
                 </p>
                 {chosen.preview.mode === 'revoke' && (
                   <p>
-                    L’accesso sarà revocato. Il vecchio link non varrà più per nessuno. Per
-                    rientrare serviranno il tuo permesso e il nuovo link.
+                    L’accesso sarà revocato. Entrambi i vecchi link smetteranno di funzionare per
+                    tutti. Per rientrare serviranno il tuo permesso e un nuovo invito.
                   </p>
                 )}
                 {chosen.preview.pauseCount > 0 && (

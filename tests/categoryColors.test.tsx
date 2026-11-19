@@ -95,7 +95,7 @@ it.each([
       groupId: 'g',
       baseCurrency: 'EUR',
       members: [
-        { userId: 'a', ownerId: 'a', displayName: 'Anna', joinedAt: '2026-01-01', leftAt: null },
+        { userId: 'a', accessRole: 'editor' as const, ownerId: 'a', displayName: 'Anna', joinedAt: '2026-01-01', leftAt: null },
       ],
       currentUserId: 'a',
       categories: catalog,

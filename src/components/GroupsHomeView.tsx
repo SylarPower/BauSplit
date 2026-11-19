@@ -7,6 +7,7 @@ import {
   MonitorSmartphone,
 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { groupRoleFor } from '../lib/groupAccess';
 import { CURRENCIES, formatMoney } from '../lib/currencies';
 import type { DeviceGroup } from '../lib/deviceGroups';
 import { AcceptInviteForm } from './AcceptInviteForm';
@@ -174,7 +175,7 @@ export function GroupsHomeView({
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <span className="badge badge-accent" style={{ alignSelf: 'flex-start' }}>
-                      Invito a un gruppo privato
+                      {pendingInvite.preview.inviteRole === 'viewer' ? 'Solo visualizzazione' : 'Invito con modifica'}
                     </span>
                     <h2 style={{ fontSize: 19, fontWeight: 700, marginTop: 4 }}>
                       {pendingInvite.preview.groupName}
@@ -192,6 +193,19 @@ export function GroupsHomeView({
                     </p>
                   </div>
 
+                  {pendingInvite.preview.alreadyMember ? (
+                    <p className="field-hint">
+                      Il link non cambia il tuo accesso attuale:{' '}
+                      {pendingInvite.preview.accessRole === 'viewer' ? 'solo visualizzazione' : 'con modifica'}.
+                    </p>
+                  ) : pendingInvite.preview.accessRole === 'viewer' ? (
+                    <p className="text-secondary">
+                      Puoi vedere le spese, il tuo saldo e lo storico, ma non modificare il gruppo
+                      né registrare rimborsi. Le quote già assegnate al tuo nome restano invariate.
+                    </p>
+                  ) : pendingInvite.preview.inviteRole === 'viewer' ? (
+                    <p className="field-hint">Hai creato tu il gruppo: rientri con i tuoi permessi di modifica.</p>
+                  ) : null}
                   {pendingInvite.preview.alreadyMember ? (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
@@ -243,7 +257,7 @@ export function GroupsHomeView({
                       {pendingInvite.preview?.reason === 'closed'
                         ? 'Questo gruppo è stato chiuso e non accetta nuovi membri.'
                         : pendingInvite.preview?.reason === 'disabled'
-                          ? 'I membri di questo gruppo hanno temporaneamente disattivato gli inviti.'
+                          ? 'Questo link è disattivato. Chiedi un invito attivo a chi gestisce il gruppo.'
                           : pendingInvite.preview?.reason === 'revoked'
                             ? 'Per rientrare serve il permesso di chi ha creato il gruppo.'
                             : 'Il link potrebbe essere stato rigenerato. Chiedi un nuovo link a chi ti ha invitato.'}
@@ -318,6 +332,9 @@ export function GroupsHomeView({
                         <div className="group-card-main">
                           <div className="group-card-title">
                             <span>{group.name}</span>
+                            {groupRoleFor(members, ownerId) === 'viewer' && (
+                              <span className="badge">Solo visualizzazione</span>
+                            )}
                             {group.quickCreatorSeat && <span className="badge badge-accent">Serata</span>}
                             <span className="badge">{group.baseCurrency}</span>
                           </div>
@@ -383,6 +400,9 @@ export function GroupsHomeView({
                           <div className="group-card-main">
                             <div className="group-card-title">
                               <span>{group.name}</span>
+                              {groupRoleFor(members, ownerId) === 'viewer' && (
+                                <span className="badge">Solo visualizzazione</span>
+                              )}
                               {group.quickCreatorSeat && <span className="badge badge-accent">Serata</span>}
                               <span className="badge badge-warning">{group.quickCreatorSeat ? 'Archiviata' : 'Chiuso'}</span>
                               <span className="badge">{group.baseCurrency}</span>

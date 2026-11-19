@@ -144,7 +144,7 @@ it('nome nuovo anche in ricerca, dettaglio, filtri, CSV, Insights e prossima ric
       currentUserId="a"
       groupName="Viaggio"
       baseCurrency="EUR"
-      isClosed={false}
+      canEdit
       filters={{ ...DEFAULT_EXPENSE_FILTERS, search: 'dispensa' }}
       onFiltersChange={vi.fn()}
       onAddExpense={vi.fn()}
