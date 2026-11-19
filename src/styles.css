@@ -445,6 +445,16 @@ textarea:focus-visible {
   gap: 10px;
 }
 
+.category-suggestion:not(:empty) {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.category-suggestion svg { flex: none; margin-top: 2px; }
+
 /* Preferenza personale: due radio native, etichette interamente selezionabili. */
 .appearance-setting { min-width: 0; margin: 0; padding: 0; border: 0; }
 .appearance-setting legend { padding: 0; margin-bottom: 6px; }

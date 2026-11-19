@@ -871,6 +871,7 @@ export function GroupView({
         members={members}
         currentUserId={currentUserId}
         categories={categories}
+        expenses={expenses}
         editingExpense={editingExpense}
         onSaveExpense={handleSaveExpense}
         onCreateRecurringWithOptionalFirst={handleCreateRecurringWithFirst}
