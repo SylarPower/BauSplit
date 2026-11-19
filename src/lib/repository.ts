@@ -1,9 +1,12 @@
+import { simplifyEventDebts } from './quickEvent';
 import type {
   ActivityChanges,
   ActivityLog,
   CategoryOption,
   CategoryPatch,
   CreateGroupInput,
+  QuickEventInput,
+  QuickPersonInput,
   InviteChoice,
   Expense,
   ExpenseGroup,
@@ -23,6 +26,7 @@ import type {
 } from '../types';
 import {
   computeExpenseSplits,
+  convertTransferAmount,
   computeMemberBalances,
   convertToBaseAmount,
   simplifyDebts,
@@ -52,6 +56,8 @@ export interface DataRepository {
 
   listGroupOverviews(currentUserId: string): Promise<GroupOverview[]>;
   createGroup(params: CreateGroupInput): Promise<ExpenseGroup>;
+  createQuickEvent(input: QuickEventInput): Promise<ExpenseGroup>;
+  addQuickPeople(groupId: string, people: QuickPersonInput[]): Promise<void>;
   updateGroup(params: {
     groupId: string;
     actorId: string;
@@ -138,7 +144,8 @@ export function buildCounterpartHint(
   members: GroupMember[],
   expenses: Expense[],
   settlements: Settlement[],
-  baseCurrency: string
+  baseCurrency: string,
+  planDebts = simplifyDebts
 ): { myNetBalance: number; counterpartHint: string; totalSpentBase: number } {
   const balances = computeMemberBalances(members, expenses, settlements, baseCurrency);
   const me = balances.find((b) => b.userId === currentUserId);
@@ -153,7 +160,7 @@ export function buildCounterpartHint(
     };
   }
 
-  const transfers = simplifyDebts(balances, baseCurrency);
+  const transfers = planDebts(balances, baseCurrency);
   const incoming = transfers.filter((t) => t.toUser === currentUserId);
   const outgoing = transfers.filter((t) => t.fromUser === currentUserId);
 
@@ -197,7 +204,7 @@ export async function processDueRecurringExpenses(params: {
   forceSingleOccurrence?: boolean;
 }): Promise<number> {
   const { repo, actorId, data, onlyRecurringId, forceSingleOccurrence = false } = params;
-  if (data.group.closedAt !== null) return 0;
+  if (data.group.closedAt !== null || data.group.quickCreatorSeat) return 0;
   const today = todayISO();
   const activeMembers = data.members.filter((m) => m.leftAt === null);
   const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
@@ -349,6 +356,7 @@ function mapSettlementKind(v: unknown): SettlementKind {
 function mapGroup(row: Record<string, unknown>): ExpenseGroup {
   return {
     id: String(row.id),
+    quickCreatorSeat: row.quick_creator_seat ? String(row.quick_creator_seat) : null,
     name: String(row.name ?? ''),
     description: String(row.description ?? ''),
     baseCurrency: String(row.base_currency ?? 'EUR'),
@@ -372,6 +380,13 @@ function mapMember(row: { user_id: string; owner_id: string | null; display_name
   const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
   return { userId: row.user_id, ownerId: row.owner_id, displayName: row.display_name ?? profile?.display_name ?? 'Membro',
     joinedAt: row.joined_at, leftAt: row.left_at };
+}
+
+function quickPeoplePayload(people: QuickPersonInput[]) {
+  return people.map(({ name, source }) => ({
+    name: name.trim(),
+    ...(source && { group_id: source.groupId, user_id: source.seatId }),
+  }));
 }
 
 export class SupabaseRepository implements DataRepository {
@@ -502,7 +517,8 @@ export class SupabaseRepository implements DataRepository {
         allMembers,
         expenses,
         settlements,
-        group.baseCurrency
+        group.baseCurrency,
+        group.quickCreatorSeat ? simplifyEventDebts : simplifyDebts
       );
 
       return {
@@ -525,6 +541,23 @@ export class SupabaseRepository implements DataRepository {
     }).single();
     if (error) throw error;
     return mapGroup(data as Record<string, unknown>);
+  }
+
+  async createQuickEvent(input: QuickEventInput): Promise<ExpenseGroup> {
+    const { data, error } = await this.client.rpc('create_quick_event', {
+      p_name: input.name.trim(),
+      p_base_currency: input.baseCurrency,
+      p_people: quickPeoplePayload(input.people),
+    }).single();
+    if (error) throw error;
+    return mapGroup(data as Record<string, unknown>);
+  }
+
+  async addQuickPeople(groupId: string, people: QuickPersonInput[]): Promise<void> {
+    const { error } = await this.client.rpc('add_quick_event_people', {
+      p_event_id: groupId, p_people: quickPeoplePayload(people),
+    });
+    if (error) throw error;
   }
 
   async updateGroup(params: {
@@ -590,14 +623,14 @@ export class SupabaseRepository implements DataRepository {
       params;
 
     const fx =
-      targetGroup && sourceGroup.baseCurrency !== targetGroup.baseCurrency ? exchangeRate : 1;
+      targetGroup && sourceGroup.baseCurrency !== targetGroup.baseCurrency ? Number(exchangeRate.toFixed(8)) : 1;
 
     const payloadTransfers = targetGroup
       ? transfers.map((tr) => ({
           from_user: tr.fromUser,
           to_user: tr.toUser,
           source_amount: tr.amount,
-          target_amount: convertToBaseAmount(
+          target_amount: convertTransferAmount(
             tr.amount,
             sourceGroup.baseCurrency,
             fx,
@@ -758,6 +791,10 @@ export class SupabaseRepository implements DataRepository {
 
     const group = mapGroup(groupRes.data as Record<string, unknown>);
 
+    const matches = group.quickCreatorSeat && !group.closedAt
+      ? await this.client.rpc('get_quick_event_matches', { p_event_id: groupId })
+      : null;
+    if (matches?.error) throw matches.error;
     const members = (membersRes.data ?? []).map(mapMember);
     const actorNames = new Map(members.map((m) => [m.ownerId, m.displayName]));
 
@@ -864,6 +901,9 @@ export class SupabaseRepository implements DataRepository {
       group,
       members,
       categories,
+      quickMatches: (matches?.data ?? []).map((row: { peer_id: string; group_id: string; target_peer: string; can_carry: boolean }) => ({
+        peerId: row.peer_id, groupId: row.group_id, seatId: row.target_peer, canCarry: row.can_carry,
+      })),
       expenses: withCurrentCategoryLabels(expenses, categories),
       settlements,
       recurringExpenses: withCurrentCategoryLabels(recurringExpenses, categories),

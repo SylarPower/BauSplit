@@ -3,6 +3,7 @@ import {
   Link2,
   Plus,
   Users,
+  Zap,
   MonitorSmartphone,
 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
@@ -10,9 +11,10 @@ import { CURRENCIES, formatMoney } from '../lib/currencies';
 import type { DeviceGroup } from '../lib/deviceGroups';
 import { AcceptInviteForm } from './AcceptInviteForm';
 import { extractInviteToken, translateErrorIT } from '../lib/supabase';
-import type { CreateGroupInput, GroupOverview, InviteChoice, InvitePreview } from '../types';
+import type { CreateGroupInput, GroupOverview, QuickEventInput, InviteChoice, InvitePreview } from '../types';
 import { Avatar } from './Icon';
 import { Modal } from './Modal';
+import { QuickEventForm } from './QuickEventForm';
 import { SetupGuideCard } from './SetupGuideCard';
 
 interface GroupsHomeViewProps {
@@ -21,6 +23,8 @@ interface GroupsHomeViewProps {
   schemaMissing: boolean;
   isGuest: boolean;
   defaultName: string;
+  ownerId: string;
+  onCreateQuickEvent: (input: QuickEventInput) => Promise<void>;
   bookmarks: DeviceGroup[];
   loadError: string | null;
   onAccount: () => void;
@@ -46,6 +50,8 @@ export function GroupsHomeView({
   schemaMissing,
   isGuest,
   defaultName,
+  ownerId,
+  onCreateQuickEvent,
   bookmarks,
   loadError,
   onAccount,
@@ -58,6 +64,7 @@ export function GroupsHomeView({
   onDeclineInvite,
   onToast,
 }: GroupsHomeViewProps) {
+  const [showEvent, setShowEvent] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -131,6 +138,9 @@ export function GroupsHomeView({
             >
               <Link2 size={15} />
               Hai un invito?
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setShowEvent(true)}>
+              <Zap size={16} /> Conto al volo
             </button>
             <button
               type="button"
@@ -304,6 +314,7 @@ export function GroupsHomeView({
                         <div className="group-card-main">
                           <div className="group-card-title">
                             <span>{group.name}</span>
+                            {group.quickCreatorSeat && <span className="badge badge-accent">Serata</span>}
                             <span className="badge">{group.baseCurrency}</span>
                           </div>
                           <div className="group-card-meta">
@@ -368,7 +379,8 @@ export function GroupsHomeView({
                           <div className="group-card-main">
                             <div className="group-card-title">
                               <span>{group.name}</span>
-                              <span className="badge badge-warning">Chiuso</span>
+                              {group.quickCreatorSeat && <span className="badge badge-accent">Serata</span>}
+                              <span className="badge badge-warning">{group.quickCreatorSeat ? 'Archiviata' : 'Chiuso'}</span>
                               <span className="badge">{group.baseCurrency}</span>
                             </div>
                             <div className="group-card-meta">
@@ -416,6 +428,16 @@ export function GroupsHomeView({
         </>
       )}
 
+      {showEvent && (
+        <QuickEventForm
+          mode="create"
+          groups={groups}
+          ownerId={ownerId}
+          selfName={defaultName}
+          onCreate={onCreateQuickEvent}
+          onClose={() => setShowEvent(false)}
+        />
+      )}
       {/* Modale creazione nuovo gruppo */}
       <Modal
         open={showCreate}

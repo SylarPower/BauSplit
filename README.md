@@ -21,17 +21,24 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 - Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. L’ultimo partecipante viene avvisato prima di eliminare il gruppo.
 - Chiudere e riaprire un gruppo. Puoi lasciarvi i saldi oppure spostarli in un altro gruppo attivo dove sono presenti **tutte le persone coinvolte**, anche con una valuta diversa. Conta la persona che ha scelto il posto in entrambi i gruppi, non la semplice coincidenza fra due nomi. I gruppi chiusi rimangono consultabili ed esportabili.
 
+## Una cena con amici: Conto al volo
+
+1. Da **I tuoi gruppi → Conto al volo**, dai un nome alla serata. All’inizio ci sei solo tu. Seleziona chi vuoi da **Persone dai tuoi gruppi**, oppure scrivi gli altri nomi, uno per riga. Anche dopo la creazione puoi premere **Aggiungi persone**. Se due persone hanno lo stesso nome, usa un soprannome nella serata.
+2. Registra i pagamenti scegliendo ogni volta chi ha anticipato e per chi: ad esempio cena per quattro, taxi per tre. Basta il tuo telefono. Selezionare qualcuno non gli concede accesso: per entrare serve sempre accettare un invito. Fino a 12 saldi aperti, BauSplit cerca il minor numero di pagamenti; per comitive più grandi usa la compensazione semplificata. **Copia riepilogo** prepara un testo per la chat con totale e rimborsi ancora da fare, senza link privati. In **Saldi** segna solo i rimborsi realmente avvenuti.
+3. Quando tutti gli altri sono in pari, se resta un debito tra te e il partner, scegli **Concludi serata → Riporta nel gruppo di coppia**. Serve un gruppo ordinario aperto con solo voi due come partecipanti attivi. Se hai scelto il partner dal gruppo, non deve entrare nella serata: vale il posto scelto, non la coincidenza del nome. Anche un posto non ancora collegato a un account è riconoscibile nel suo gruppo di origine. Un nome scritto a mano, invece, non prova l’identità. Verifica chi deve a chi, l’importo, il gruppo e l’eventuale cambio, poi conferma. Troverai nel gruppo di coppia **un riporto del saldo, non una seconda spesa**.
+4. In alternativa puoi lasciare il conto aperto o scegliere **Archivia senza riporto**. Lo ritrovi in **Gruppi chiusi**, con lo storico: archiviare non equivale a segnare pagamenti.
+
 ## Mettere BauSplit online, passo per passo
 
 ### 1. Aggiorna il tuo progetto Supabase
 
-**Se usi già la versione con le 11 categorie modificabili**, il nuovo selettore colori non richiede aggiornamenti su Supabase: passa al punto 3.
+**Per attivare Conto al volo**, esegui una volta lo script di questa versione anche se avevi già aggiornato le categorie. Se accessi e inviti funzionano, non devi riconfigurarli.
 
 1. Apri il progetto che contiene già le tue spese (`mwicplgacecjaeyzbuhx`, se usi quello impostato nell’app). **Non creare un nuovo progetto e non cancellare tabelle.** Se contiene dati importanti, fai prima una copia di sicurezza.
 2. In questa versione del repository apri [**supabase/schema.sql**](./supabase/schema.sql) e copia **tutto** il contenuto del file.
 3. Nel progetto Supabase apri [**SQL Editor → New query**](https://supabase.com/dashboard/project/mwicplgacecjaeyzbuhx/sql/new), incolla il testo e premi **Run**. Se Supabase chiede se aggiungere regole di accesso automatiche, scegli **Run without RLS** per questo script completo: contiene già le regole che proteggono i gruppi. Aspetta la conferma di successo prima di proseguire. Questo aggiorna i gruppi esistenti senza ricreare conti, quote e cambi; puoi eseguirlo anche su un progetto vuoto. Se l’app rileva che manca l’aggiornamento, offre lo stesso file con **Copia script SQL**.
 
-Se gli accessi funzionavano già nella versione precedente, non devi riconfigurarli per usare categorie e cambio: passa al punto 3.
+Se gli accessi funzionavano già nella versione precedente, puoi saltare la configurazione seguente.
 
 ### 2. Permetti entrambi i modi di entrare
 

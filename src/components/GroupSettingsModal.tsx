@@ -1,21 +1,9 @@
-import {
-  Archive,
-  ArchiveRestore,
-  ArrowRight,
-  LogOut,
-  Plus,
-  RefreshCw,
-} from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowRight, LogOut, Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import {
-  convertToBaseAmount,
-  getGroupTransferTargets,
-} from '../lib/accounting';
-import {
-  formatMoney,
-  formatRateValue,
-} from '../lib/currencies';
+import { convertTransferAmount, getGroupTransferTargets } from '../lib/accounting';
+import { formatMoney, formatRateValue } from '../lib/currencies';
 import { formatFullDateIT, todayISO } from '../lib/dates';
+import { quickTransferTargets } from '../lib/quickEvent';
 import { translateErrorIT } from '../lib/supabase';
 import { useExchangeRate } from '../lib/useExchangeRate';
 import type {
@@ -23,6 +11,7 @@ import type {
   GroupMember,
   GroupOverview,
   MemberBalance,
+  QuickEventMatch,
   SimplifiedTransfer,
 } from '../types';
 import { Avatar } from './Icon';
@@ -36,6 +25,7 @@ interface GroupSettingsModalProps extends CategoryManagerProps {
   initialFocusClose?: boolean;
   group: ExpenseGroup;
   allGroups: GroupOverview[];
+  quickMatches?: QuickEventMatch[];
   members: GroupMember[];
   balances: MemberBalance[];
   transfers: SimplifiedTransfer[];
@@ -58,6 +48,7 @@ export function GroupSettingsModal({
   initialFocusClose = false,
   group,
   allGroups,
+  quickMatches,
   members,
   balances,
   transfers,
@@ -74,6 +65,8 @@ export function GroupSettingsModal({
   onToast,
 }: GroupSettingsModalProps) {
   const isClosed = group.closedAt !== null;
+  const isEvent = !!group.quickCreatorSeat;
+  const eventCloseOnly = isEvent && initialFocusClose && !isClosed;
 
   const [name, setName] = useState(group.name);
   const [description, setDescription] = useState(group.description);
@@ -83,7 +76,7 @@ export function GroupSettingsModal({
   const [addingMember, setAddingMember] = useState(false);
   // Chiusura gruppo e trasferimento saldo rimanente
   const [showClosePanel, setShowClosePanel] = useState(false);
-  const [closeMode, setCloseMode] = useState<'transfer' | 'keep'>('transfer');
+  const [requestedMode, setCloseMode] = useState<'transfer' | 'keep'>('keep');
   const [targetGroupId, setTargetGroupId] = useState('');
   const [closingBusy, setClosingBusy] = useState(false);
 
@@ -91,24 +84,31 @@ export function GroupSettingsModal({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
 
-  const nameMap = useMemo(
-    () => new Map(members.map((m) => [m.userId, m.displayName])),
-    [members]
-  );
+  const nameMap = useMemo(() => new Map(members.map((m) => [m.userId, m.displayName])), [members]);
   const nameOf = (uid: string) => nameMap.get(uid) ?? 'Membro';
 
   const transferTargets = useMemo(
     () =>
-      getGroupTransferTargets({
-        sourceGroupId: group.id,
-        sourceMembers: members,
-        transfers,
-        allGroups,
-        nameOf,
-      }),
+      group.quickCreatorSeat
+        ? quickTransferTargets(
+            group.quickCreatorSeat,
+            currentUserId,
+            transfers,
+            quickMatches ?? [],
+            allGroups
+          )
+        : getGroupTransferTargets({
+            sourceGroupId: group.id,
+            sourceMembers: members,
+            transfers,
+            allGroups,
+            nameOf,
+          }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [group.id, transfers, allGroups, nameMap]
+    [group.id, group.quickCreatorSeat, currentUserId, quickMatches, transfers, allGroups, nameMap]
   );
+
+  const closeMode = transferTargets.eligible.length > 0 ? requestedMode : 'keep';
 
   const selectedTargetGroup: ExpenseGroup | null = useMemo(() => {
     if (transfers.length === 0 || closeMode !== 'transfer' || !targetGroupId) return null;
@@ -138,12 +138,14 @@ export function GroupSettingsModal({
       setDescription(group.description);
       setConfirmLeave(false);
       setShowClosePanel(initialFocusClose);
-      if (transfers.length > 0 && transferTargets.eligible.length > 0) {
+      if (!isEvent && transfers.length > 0 && transferTargets.eligible.length > 0) {
         setCloseMode('transfer');
         setTargetGroupId(transferTargets.eligible[0].group.id);
       } else {
         setCloseMode('keep');
-        setTargetGroupId(transferTargets.eligible[0]?.group.id ?? '');
+        setTargetGroupId(
+          transferTargets.eligible.length === 1 ? transferTargets.eligible[0].group.id : ''
+        );
       }
       resetRate();
     }
@@ -180,6 +182,22 @@ export function GroupSettingsModal({
       }
     }
 
+    if (
+      needsFx &&
+      selectedTargetGroup &&
+      transfers.some(
+        (t) =>
+          convertTransferAmount(
+            t.amount,
+            group.baseCurrency,
+            parsedFx,
+            selectedTargetGroup.baseCurrency
+          ) <= 0
+      )
+    ) {
+      onToast('Il cambio non produce un importo trasferibile nella valuta di destinazione.', true);
+      return;
+    }
     setClosingBusy(true);
     try {
       await onCloseGroup({
@@ -220,8 +238,349 @@ export function GroupSettingsModal({
     }
   };
 
-  const groupUnchanged =
-    name.trim() === group.name && description.trim() === group.description;
+  const groupUnchanged = name.trim() === group.name && description.trim() === group.description;
+
+  const closingPanel = (
+    <div className="field">
+      <div style={{ fontSize: 14, fontWeight: 650 }}>
+        {isClosed
+          ? 'Stato del gruppo'
+          : isEvent
+            ? 'Chiusura della serata e saldo di coppia'
+            : 'Chiusura del gruppo e saldo rimanente'}
+      </div>
+
+      {isClosed ? (
+        <div className="fx-box">
+          <div style={{ fontSize: 13.5 }}>
+            Questo gruppo è stato chiuso il{' '}
+            <strong>{formatFullDateIT(group.closedAt!.slice(0, 10))}</strong>
+            {group.closedIntoGroupName && (
+              <>
+                {' '}
+                spostando il saldo rimanente in{' '}
+                <strong>&ldquo;{group.closedIntoGroupName}&rdquo;</strong>
+              </>
+            )}
+            . Le spese, gli Insights e lo storico restano consultabili ed esportabili in CSV.
+          </div>
+          <div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleReopen}
+              disabled={closingBusy}
+            >
+              <ArchiveRestore size={14} />
+              {closingBusy ? 'Riapertura…' : 'Riapri gruppo'}
+            </button>
+          </div>
+        </div>
+      ) : !showClosePanel ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span className="field-hint">
+            {transfers.length > 0
+              ? isEvent
+                ? 'Puoi archiviare la serata così com’è oppure, dopo i rimborsi degli amici, riportare il residuo nel gruppo di coppia.'
+                : 'Chiudi il gruppo e sposta automaticamente il saldo rimanente in un altro gruppo condiviso.'
+              : 'I conti sono in pari: puoi chiudere il gruppo mantenendone lo storico in sola lettura.'}
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              if (!isEvent && transfers.length > 0 && transferTargets.eligible.length > 0) {
+                setCloseMode('transfer');
+                if (!targetGroupId) {
+                  setTargetGroupId(transferTargets.eligible[0].group.id);
+                }
+              }
+              setShowClosePanel(true);
+            }}
+          >
+            <Archive size={14} />
+            {isEvent ? 'Concludi serata…' : 'Chiudi gruppo…'}
+          </button>
+        </div>
+      ) : (
+        <div className="fx-box" style={{ gap: 12 }}>
+          {transfers.length === 0 ? (
+            <div style={{ fontSize: 13.5 }}>
+              Tutti i saldi sono già pari a zero. Chiudendo <strong>{group.name}</strong> non
+              verranno aggiunte nuove spese (ricorrenze e link d&apos;invito verranno disattivati),
+              ma potrai sempre consultare spese, Insights e CSV o riaprirlo in seguito.
+            </div>
+          ) : (
+            <>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                  Saldo rimanente da sistemare:
+                </div>
+                <div className="split-list">
+                  {transfers.map((tr) => (
+                    <div
+                      key={`${tr.fromUser}-${tr.toUser}`}
+                      className="split-row tabular"
+                      style={{ fontSize: 13.5 }}
+                    >
+                      <span>
+                        <strong>{tr.fromName}</strong> deve a <strong>{tr.toName}</strong>
+                      </span>
+                      <span style={{ fontWeight: 650 }}>
+                        {formatMoney(tr.amount, group.baseCurrency)}
+                        {needsFx && selectedTargetGroup && parsedFx > 0 && (
+                          <span className="text-muted" style={{ fontWeight: 450 }}>
+                            {' '}
+                            (
+                            <ArrowRight
+                              size={11}
+                              style={{ verticalAlign: 'middle', margin: '0 2px' }}
+                            />
+                            {formatMoney(
+                              convertTransferAmount(
+                                tr.amount,
+                                group.baseCurrency,
+                                parsedFx,
+                                selectedTargetGroup.baseCurrency
+                              ),
+                              selectedTargetGroup.baseCurrency
+                            )}
+                            )
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {transferTargets.eligible.length > 0 ? (
+                <>
+                  <div className="segmented close-mode">
+                    <button
+                      type="button"
+                      className={`segmented-btn ${closeMode === 'transfer' ? 'active' : ''}`}
+                      aria-pressed={closeMode === 'transfer'}
+                      onClick={() => setCloseMode('transfer')}
+                    >
+                      {isEvent ? 'Riporta nel gruppo di coppia' : 'Sposta in un altro gruppo'}
+                    </button>
+                    <button
+                      type="button"
+                      className={`segmented-btn ${closeMode === 'keep' ? 'active' : ''}`}
+                      aria-pressed={closeMode === 'keep'}
+                      onClick={() => setCloseMode('keep')}
+                    >
+                      Non spostare il saldo
+                    </button>
+                  </div>
+
+                  {closeMode === 'transfer' ? (
+                    <div className="form-stack" style={{ gap: 10 }}>
+                      <label className="field">
+                        <span className="field-label">Gruppo di destinazione</span>
+                        <select
+                          className="select select-sm"
+                          value={targetGroupId}
+                          onChange={(e) => {
+                            resetRate();
+                            setTargetGroupId(e.target.value);
+                          }}
+                        >
+                          {isEvent && <option value="">Scegli il gruppo di coppia</option>}
+                          {transferTargets.eligible.map((ov) => (
+                            <option key={ov.group.id} value={ov.group.id}>
+                              {ov.group.name} ({ov.group.baseCurrency} ·{' '}
+                              {ov.members.map((m) => m.displayName).join(', ')})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="field-hint">
+                          {isEvent ? (
+                            'Verrà riportato solo il debito indicato sopra: la cena e le quote degli amici restano nella serata.'
+                          ) : (
+                            <>
+                              Sono mostrati solo i gruppi attivi in cui sono presenti tutti gli
+                              utenti coinvolti nel saldo rimanente (
+                              {transferTargets.involvedUserIds.map(nameOf).join(', ')}).
+                            </>
+                          )}
+                        </span>
+                      </label>
+
+                      {needsFx && selectedTargetGroup && (
+                        <div
+                          className="card"
+                          style={{
+                            padding: '10px 12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              fontSize: 12.5,
+                            }}
+                          >
+                            <span style={{ fontWeight: 600 }}>
+                              Conversione {group.baseCurrency} → {selectedTargetGroup.baseCurrency}
+                            </span>
+                            <button
+                              type="button"
+                              className="link-btn"
+                              style={{
+                                fontSize: 12,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                              }}
+                              onClick={() => resetRate()}
+                              disabled={loadingFx}
+                            >
+                              <RefreshCw size={11} />{' '}
+                              {loadingFx ? 'Aggiorno…' : 'Cambio automatico'}
+                            </button>
+                          </div>
+                          <RateInput
+                            key={targetGroupId}
+                            from={group.baseCurrency}
+                            to={selectedTargetGroup.baseCurrency}
+                            quote={fx.quote}
+                            onChange={fx.write}
+                          />
+                          {parsedFx > 0 && (
+                            <span className="field-hint">
+                              Tasso applicato: 1 {group.baseCurrency} = {formatRateValue(parsedFx)}{' '}
+                              {selectedTargetGroup.baseCurrency}.
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {isEvent && selectedTargetGroup && (!needsFx || parsedFx > 0) && (
+                        <div className="card-subtle" aria-live="polite">
+                          <strong>Conferma il riporto in {selectedTargetGroup.name}</strong>
+                          <p>
+                            {transfers[0].fromName} deve a {transfers[0].toName}{' '}
+                            <strong>
+                              {formatMoney(
+                                convertTransferAmount(
+                                  transfers[0].amount,
+                                  group.baseCurrency,
+                                  parsedFx,
+                                  selectedTargetGroup.baseCurrency
+                                ),
+                                selectedTargetGroup.baseCurrency
+                              )}
+                            </strong>
+                            . Le spese restano in {group.name}.
+                          </p>
+                        </div>
+                      )}
+                      {!isEvent && selectedTargetGroup && (
+                        <p className="field-hint">
+                          Il saldo di <strong>{group.name}</strong> verrà portato a zero e sommato
+                          automaticamente ai saldi di <strong>{selectedTargetGroup.name}</strong>,
+                          senza alterare le statistiche di spesa negli Insights.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="field-hint">
+                      Il gruppo verrà archiviato come chiuso mantenendo invariato il saldo residuo
+                      indicato sopra.
+                    </p>
+                  )}
+                </>
+              ) : isEvent ? (
+                <p className="alert alert-warning">
+                  {currentUserId !== group.quickCreatorSeat
+                    ? 'Solo chi ha creato la serata può riportare un saldo nel gruppo di coppia.'
+                    : transfers.length > 1
+                      ? 'Ci sono ancora più rimborsi da fare. In Saldi registra quelli degli amici prima di riportare il residuo della coppia.'
+                      : 'Non c’è un gruppo di coppia idoneo per questo saldo. Serve un gruppo aperto con voi due, riconosciuti dal posto scelto o da un invito accettato. Un nome uguale non basta.'}
+                </p>
+              ) : (
+                <div className="alert alert-warning" style={{ flexDirection: 'column', gap: 6 }}>
+                  <span>
+                    Non hai ancora un altro gruppo attivo che includa tutti gli utenti coinvolti nel
+                    saldo rimanente (
+                    <strong>{transferTargets.involvedUserIds.map(nameOf).join(', ')}</strong>).
+                  </span>
+                  {transferTargets.ineligible.length > 0 && (
+                    <span style={{ fontSize: 12.5 }}>
+                      {transferTargets.ineligible.slice(0, 3).map((item) => (
+                        <span key={item.overview.group.id} style={{ display: 'block' }}>
+                          • In &ldquo;{item.overview.group.name}&rdquo; manca:{' '}
+                          {item.missingNames.join(', ')} (se saldi prima la sua quota, potrai
+                          spostare qui il resto).
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 12.5 }}>
+                    Ogni persona deve aver scelto il proprio nome in entrambi i gruppi: due nomi
+                    uguali non bastano. Puoi pareggiare le quote di chi non ne fa parte, oppure
+                    chiudere comunque questo gruppo senza spostare il saldo.
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleConfirmCloseGroup}
+              disabled={
+                closingBusy ||
+                loadingFx ||
+                (closeMode === 'transfer' && transfers.length > 0 && !selectedTargetGroup)
+              }
+            >
+              <Archive size={14} />
+              {closingBusy
+                ? 'Chiusura in corso…'
+                : transfers.length > 0 && closeMode === 'transfer' && selectedTargetGroup
+                  ? `Sposta saldo in "${selectedTargetGroup.name}" e chiudi`
+                  : isEvent
+                    ? 'Archivia senza riporto'
+                    : 'Conferma chiusura gruppo'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => (eventCloseOnly ? onClose() : setShowClosePanel(false))}
+              disabled={closingBusy}
+            >
+              Annulla
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (eventCloseOnly) {
+    return (
+      <Modal open={open} title="Concludi serata" onClose={onClose} wide>
+        {closingPanel}
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -236,288 +595,7 @@ export function GroupSettingsModal({
       }
     >
       <div className="form-stack">
-        {/* Sezione Chiusura / Riapertura gruppo e spostamento saldo rimanente */}
-        <div className="field">
-          <div style={{ fontSize: 14, fontWeight: 650 }}>
-            {isClosed ? 'Stato del gruppo' : 'Chiusura del gruppo e saldo rimanente'}
-          </div>
-
-          {isClosed ? (
-            <div className="fx-box">
-              <div style={{ fontSize: 13.5 }}>
-                Questo gruppo è stato chiuso il{' '}
-                <strong>{formatFullDateIT(group.closedAt!.slice(0, 10))}</strong>
-                {group.closedIntoGroupName && (
-                  <>
-                    {' '}
-                    spostando il saldo rimanente in{' '}
-                    <strong>&ldquo;{group.closedIntoGroupName}&rdquo;</strong>
-                  </>
-                )}
-                . Le spese, gli Insights e lo storico restano consultabili ed esportabili in CSV.
-              </div>
-              <div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleReopen}
-                  disabled={closingBusy}
-                >
-                  <ArchiveRestore size={14} />
-                  {closingBusy ? 'Riapertura…' : 'Riapri gruppo'}
-                </button>
-              </div>
-            </div>
-          ) : !showClosePanel ? (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span className="field-hint">
-                {transfers.length > 0
-                  ? 'Chiudi il gruppo e sposta automaticamente il saldo rimanente in un altro gruppo condiviso.'
-                  : 'I conti sono in pari: puoi chiudere il gruppo mantenendone lo storico in sola lettura.'}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  if (transfers.length > 0 && transferTargets.eligible.length > 0) {
-                    setCloseMode('transfer');
-                    if (!targetGroupId) {
-                      setTargetGroupId(transferTargets.eligible[0].group.id);
-                    }
-                  }
-                  setShowClosePanel(true);
-                }}
-              >
-                <Archive size={14} />
-                Chiudi gruppo…
-              </button>
-            </div>
-          ) : (
-            <div className="fx-box" style={{ gap: 12 }}>
-              {transfers.length === 0 ? (
-                <div style={{ fontSize: 13.5 }}>
-                  Tutti i saldi sono già pari a zero. Chiudendo <strong>{group.name}</strong> non
-                  verranno aggiunte nuove spese (ricorrenze e link d&apos;invito verranno
-                  disattivati), ma potrai sempre consultare spese, Insights e CSV o riaprirlo in
-                  seguito.
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                      Saldo rimanente da sistemare:
-                    </div>
-                    <div className="split-list">
-                      {transfers.map((tr) => (
-                        <div
-                          key={`${tr.fromUser}-${tr.toUser}`}
-                          className="split-row tabular"
-                          style={{ fontSize: 13.5 }}
-                        >
-                          <span>
-                            <strong>{tr.fromName}</strong> deve a <strong>{tr.toName}</strong>
-                          </span>
-                          <span style={{ fontWeight: 650 }}>
-                            {formatMoney(tr.amount, group.baseCurrency)}
-                            {needsFx && selectedTargetGroup && parsedFx > 0 && (
-                              <span className="text-muted" style={{ fontWeight: 450 }}>
-                                {' '}
-                                (
-                                <ArrowRight
-                                  size={11}
-                                  style={{ verticalAlign: 'middle', margin: '0 2px' }}
-                                />
-                                {formatMoney(
-                                  convertToBaseAmount(
-                                    tr.amount,
-                                    group.baseCurrency,
-                                    parsedFx,
-                                    selectedTargetGroup.baseCurrency
-                                  ),
-                                  selectedTargetGroup.baseCurrency
-                                )}
-                                )
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {transferTargets.eligible.length > 0 ? (
-                    <>
-                      <div className="segmented">
-                        <button
-                          type="button"
-                          className={`segmented-btn ${closeMode === 'transfer' ? 'active' : ''}`}
-                          onClick={() => setCloseMode('transfer')}
-                        >
-                          Sposta in un altro gruppo
-                        </button>
-                        <button
-                          type="button"
-                          className={`segmented-btn ${closeMode === 'keep' ? 'active' : ''}`}
-                          onClick={() => setCloseMode('keep')}
-                        >
-                          Non spostare il saldo
-                        </button>
-                      </div>
-
-                      {closeMode === 'transfer' ? (
-                        <div className="form-stack" style={{ gap: 10 }}>
-                          <label className="field">
-                            <span className="field-label">Gruppo di destinazione</span>
-                            <select
-                              className="select select-sm"
-                              value={targetGroupId}
-                              onChange={(e) => {
-                                resetRate();
-                                setTargetGroupId(e.target.value);
-                              }}
-                            >
-                              {transferTargets.eligible.map((ov) => (
-                                <option key={ov.group.id} value={ov.group.id}>
-                                  {ov.group.name} ({ov.group.baseCurrency} ·{' '}
-                                  {ov.members.map((m) => m.displayName).join(', ')})
-                                </option>
-                              ))}
-                            </select>
-                            <span className="field-hint">
-                              Sono mostrati solo i gruppi attivi in cui sono presenti tutti gli
-                              utenti coinvolti nel saldo rimanente (
-                              {transferTargets.involvedUserIds.map(nameOf).join(', ')}).
-                            </span>
-                          </label>
-
-                          {needsFx && selectedTargetGroup && (
-                            <div
-                              className="card"
-                              style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}
-                            >
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  fontSize: 12.5,
-                                }}
-                              >
-                                <span style={{ fontWeight: 600 }}>
-                                  Conversione {group.baseCurrency} →{' '}
-                                  {selectedTargetGroup.baseCurrency}
-                                </span>
-                                <button
-                                  type="button"
-                                  className="link-btn"
-                                  style={{
-                                    fontSize: 12,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                  }}
-                                  onClick={() => resetRate()}
-                                  disabled={loadingFx}
-                                >
-                                  <RefreshCw size={11} />{' '}
-                                  {loadingFx ? 'Aggiorno…' : 'Cambio automatico'}
-                                </button>
-                              </div>
-                              <RateInput
-                                key={targetGroupId}
-                                from={group.baseCurrency}
-                                to={selectedTargetGroup.baseCurrency}
-                                quote={fx.quote}
-                                onChange={fx.write}
-                              />
-                              {parsedFx > 0 && (
-                                <span className="field-hint">
-                                  Tasso applicato: 1 {group.baseCurrency} = {formatRateValue(parsedFx)}{' '}
-                                  {selectedTargetGroup.baseCurrency}.
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          <p className="field-hint">
-                            Il saldo di <strong>{group.name}</strong> verrà portato a zero e
-                            sommato automaticamente ai saldi di{' '}
-                            <strong>{selectedTargetGroup?.name}</strong>, senza alterare le
-                            statistiche di spesa negli Insights.
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="field-hint">
-                          Il gruppo verrà archiviato come chiuso mantenendo invariato il saldo
-                          residuo indicato sopra.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <div className="alert alert-warning" style={{ flexDirection: 'column', gap: 6 }}>
-                      <span>
-                        Non hai ancora un altro gruppo attivo che includa tutti gli utenti coinvolti
-                        nel saldo rimanente (
-                        <strong>{transferTargets.involvedUserIds.map(nameOf).join(', ')}</strong>).
-                      </span>
-                      {transferTargets.ineligible.length > 0 && (
-                        <span style={{ fontSize: 12.5 }}>
-                          {transferTargets.ineligible.slice(0, 3).map((item) => (
-                            <span key={item.overview.group.id} style={{ display: 'block' }}>
-                              • In &ldquo;{item.overview.group.name}&rdquo; manca:{' '}
-                              {item.missingNames.join(', ')} (se saldi prima la sua quota, potrai
-                              spostare qui il resto).
-                            </span>
-                          ))}
-                        </span>
-                      )}
-                      <span style={{ fontSize: 12.5 }}>
-                        Ogni persona deve aver scelto il proprio nome in entrambi i gruppi: due nomi uguali non bastano. Puoi pareggiare le quote di chi
-                        non ne fa parte, oppure chiudere comunque questo gruppo senza spostare il
-                        saldo.
-                      </span>
-                    </div>
-                  )}
-                </>
-              )}
-
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={handleConfirmCloseGroup}
-                  disabled={closingBusy || loadingFx}
-                >
-                  <Archive size={14} />
-                  {closingBusy
-                    ? 'Chiusura in corso…'
-                    : transfers.length > 0 &&
-                        closeMode === 'transfer' &&
-                        selectedTargetGroup
-                      ? `Sposta saldo in "${selectedTargetGroup.name}" e chiudi`
-                      : 'Conferma chiusura gruppo'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setShowClosePanel(false)}
-                  disabled={closingBusy}
-                >
-                  Annulla
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
+        {closingPanel}
         {/* Dettagli gruppo e categorie personalizzate (solo se il gruppo è aperto) */}
         {!isClosed && (
           <>
@@ -594,14 +672,14 @@ export function GroupSettingsModal({
                       )}
                     </div>
                     <div className="field-hint">
-                      {m.ownerId === null && 'Nome da scegliere nell’invito · '}Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
+                      {m.ownerId === null && (isEvent ? 'Partecipante senza accesso · ' : 'Nome da scegliere nell’invito · ')}Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
                     </div>
                   </div>
                 </div>
               </div>
             ))}
           </div>
-          {!isClosed && (
+          {!isClosed && !isEvent && (
             <form className="form-stack" onSubmit={async (event) => {
               event.preventDefault();
               setAddingMember(true);

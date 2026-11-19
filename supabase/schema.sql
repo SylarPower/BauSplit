@@ -82,6 +82,9 @@ alter table public.expense_groups add column if not exists closed_by uuid null r
 alter table public.expense_groups add column if not exists closed_into_group_id uuid null references public.expense_groups(id) on delete set null;
 alter table public.expense_groups add column if not exists closed_into_group_name text null;
 
+-- NULL per tutti i gruppi ordinari, anche quelli già esistenti. Non concede accesso.
+alter table public.expense_groups add column if not exists quick_creator_seat uuid;
+
 -- Solo le differenze rispetto alle categorie predefinite del catalogo.
 alter table public.expense_groups add column if not exists category_presets jsonb not null default '{}';
 alter table public.expense_groups add column if not exists category_order text[] not null default '{}';
@@ -931,6 +934,108 @@ begin
 end;
 $$;
 
+-- I collegamenti contabili NON sono autorizzazioni di accesso. Il gruppo di
+-- provenienza non è esposto agli altri partecipanti né nei link d'invito.
+create table if not exists bausplit_private.event_people (
+  event_id uuid not null,
+  event_seat uuid not null,
+  origin_group uuid not null,
+  origin_seat uuid not null,
+  primary key (event_id, event_seat),
+  unique (event_id, origin_group, origin_seat),
+  foreign key (event_id, event_seat) references public.group_members(group_id, user_id) on delete cascade,
+  foreign key (origin_group, origin_seat) references public.group_members(group_id, user_id) on delete cascade
+);
+revoke all on bausplit_private.event_people from public, anon, authenticated;
+
+-- Inserimento atomico: un errore su un nome o su un riferimento annulla l'intera selezione.
+create or replace function public.add_quick_event_people(p_event_id uuid, p_people jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
+declare
+  item jsonb;
+  origin public.group_members;
+  new_seat uuid;
+begin
+  perform 1 from public.expense_groups e join public.group_members me
+    on me.group_id=e.id and me.user_id=e.quick_creator_seat
+    where e.id=p_event_id and e.closed_at is null and me.owner_id=auth.uid() and me.left_at is null
+    for update of e, me;
+  if not found then raise exception 'Solo chi ha creato la serata può aggiungere questi partecipanti a un conto aperto'; end if;
+  if jsonb_typeof(p_people) is distinct from 'array' then raise exception 'Elenco dei partecipanti non valido'; end if;
+  for item in select * from jsonb_array_elements(p_people) loop
+    if item ? 'group_id' or item ? 'user_id' then
+      -- Verifica il posto effettivo, non il nome fornito dal browser. Un nome
+      -- ancora libero nel gruppo di coppia è identificabile solo in quel gruppo.
+      select m.* into origin from public.group_members m join public.expense_groups g on g.id=m.group_id
+        join public.group_members me on me.group_id=g.id and me.owner_id=auth.uid() and me.left_at is null
+        where g.quick_creator_seat is null and m.group_id=(item->>'group_id')::uuid
+          and m.user_id=(item->>'user_id')::uuid and m.left_at is null and m.owner_id is distinct from auth.uid()
+        for share of m, me;
+      if not found then raise exception 'Partecipante non più disponibile nei tuoi gruppi'; end if;
+      if exists (select from bausplit_private.event_people l join public.group_members old
+          on old.group_id=l.origin_group and old.user_id=l.origin_seat where l.event_id=p_event_id
+          and ((old.group_id,old.user_id)=(origin.group_id,origin.user_id) or old.owner_id=origin.owner_id))
+        or exists (select from public.group_members where group_id=p_event_id and owner_id=origin.owner_id) then
+        raise exception 'Questa persona è già nella serata';
+      end if;
+      new_seat := public.add_group_participant(p_event_id,item->>'name');
+      insert into bausplit_private.event_people values (p_event_id,new_seat,origin.group_id,origin.user_id);
+    else
+      perform public.add_group_participant(p_event_id,item->>'name');
+    end if;
+  end loop;
+end;
+$$;
+
+create or replace function public.create_quick_event(p_name text, p_base_currency text, p_people jsonb default '[]')
+returns public.expense_groups language plpgsql security definer set search_path = '' as $$
+declare ev public.expense_groups;
+begin
+  ev := public.create_expense_group(p_name,'',p_base_currency,'{}');
+  update public.expense_groups set quick_creator_seat=(select user_id from public.group_members
+    where group_id=ev.id and owner_id=auth.uid()) where id=ev.id returning * into ev;
+  perform public.add_quick_event_people(ev.id,p_people);
+  return ev;
+end;
+$$;
+
+-- Un posto suggerito è riservato: l'invito non può attribuirlo a un omonimo.
+create or replace function bausplit_private.can_claim_event_seat(g uuid, seat uuid)
+returns boolean language sql stable set search_path = '' as $$
+  select not exists(select from bausplit_private.event_people l join public.group_members m
+    on (m.group_id,m.user_id)=(l.origin_group,l.origin_seat)
+    where (l.event_id,l.event_seat)=(g,seat) and (m.owner_id is distinct from auth.uid() or m.left_at is not null));
+$$;
+
+-- Un'unica mappa, usata sia per l'anteprima sia dalla chiusura sotto lock.
+-- Solo al creatore: posti riconosciuti nei suoi gruppi; riporto solo se aperti e a due.
+create or replace function public.get_quick_event_matches(p_event_id uuid)
+returns table(peer_id uuid, group_id uuid, target_peer uuid, target_self uuid, can_carry boolean)
+language sql stable security definer set search_path = '' as $$
+  select peer.user_id, dst.id, partner.user_id, me.user_id,
+         dst.closed_at is null and not exists (
+           select from public.group_members third where third.group_id=dst.id and third.left_at is null
+             and third.user_id not in (me.user_id, partner.user_id)
+         )
+    from public.expense_groups ev join public.group_members creator
+      on (creator.group_id,creator.user_id)=(ev.id,ev.quick_creator_seat) and creator.owner_id=auth.uid() and creator.left_at is null
+    join public.group_members peer on peer.group_id=ev.id and peer.user_id<>creator.user_id
+    join public.group_members me on me.owner_id=auth.uid() and me.left_at is null
+    join public.expense_groups dst on dst.id=me.group_id and dst.quick_creator_seat is null
+    join public.group_members partner on partner.group_id=dst.id and partner.user_id<>me.user_id and partner.left_at is null
+    left join bausplit_private.event_people l on (l.event_id,l.event_seat)=(ev.id,peer.user_id)
+    left join public.group_members origin on (origin.group_id,origin.user_id)=(l.origin_group,l.origin_seat)
+      and origin.left_at is null and public.is_active_group_member(origin.group_id)
+    where ev.id=p_event_id and ev.closed_at is null
+      and (partner.owner_id=peer.owner_id or (peer.owner_id is null and
+        ((partner.group_id,partner.user_id)=(origin.group_id,origin.user_id) or partner.owner_id=origin.owner_id)));
+$$;
+
+revoke all on function public.create_quick_event(text,text,jsonb), public.add_quick_event_people(uuid,jsonb),
+  public.get_quick_event_matches(uuid) from public, anon;
+grant execute on function public.create_quick_event(text,text,jsonb), public.add_quick_event_people(uuid,jsonb),
+  public.get_quick_event_matches(uuid) to authenticated;
+
 -- Anteprima sicura di un link d'invito (non espone spese né dati privati)
 create or replace function public.get_invite_preview(p_token text)
 returns jsonb
@@ -993,7 +1098,8 @@ begin
     'returning_name', (select coalesce(m.display_name, p.display_name) from public.group_members m
       join public.profiles p on p.id = m.owner_id where m.group_id = v_group.id and m.owner_id = v_uid and m.left_at is not null),
     'available_names', coalesce((select jsonb_agg(jsonb_build_object('id', user_id, 'name', display_name) order by display_name)
-      from public.group_members where group_id = v_group.id and owner_id is null and left_at is null), '[]'::jsonb)
+      from public.group_members where group_id = v_group.id and owner_id is null and left_at is null
+        and bausplit_private.can_claim_event_seat(group_id,user_id)), '[]'::jsonb)
   );
 end;
 $$;
@@ -1036,9 +1142,16 @@ begin
     -- Rientro: conserva il posto e i saldi precedenti, non prenderne un secondo.
     update public.group_members set left_at = null, joined_at = now()
       where group_id = v_group.id and user_id = v_member.user_id;
+  elsif exists (select from bausplit_private.event_people l join public.group_members m
+      on (m.group_id,m.user_id)=(l.origin_group,l.origin_seat) join public.group_members seat
+      on (seat.group_id,seat.user_id)=(l.event_id,l.event_seat) where l.event_id=v_group.id
+      and m.owner_id=v_profile.id and m.left_at is null and seat.owner_id is null and seat.left_at is null
+      and l.event_seat is distinct from p_member_id) then
+    raise exception 'Scegli il posto già riservato a te nella serata';
   elsif p_member_id is not null then
     update public.group_members set owner_id = v_profile.id
       where group_id = v_group.id and user_id = p_member_id and owner_id is null and left_at is null
+        and bausplit_private.can_claim_event_seat(group_id,user_id)
       returning * into v_member;
     if not found then raise exception 'Questo nome non è più disponibile. Scegline un altro'; end if;
   else
@@ -1468,6 +1581,25 @@ begin
 end;
 $$;
 
+-- Anche un rimborso ordinario (scritto tramite PostgREST, non una RPC) deve
+-- serializzarsi con la chiusura della serata. I riporti della RPC hanno già il lock.
+create or replace function bausplit_private.lock_event_settlement() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare gid uuid; closed timestamptz;
+begin
+  if tg_op='UPDATE' and old.group_id<>new.group_id then raise exception 'Non puoi cambiare il gruppo di un rimborso'; end if;
+  gid := case when tg_op='DELETE' then old.group_id else new.group_id end;
+  select g.closed_at into closed from public.expense_groups g
+    where g.id=gid and g.quick_creator_seat is not null and public.is_active_group_member(gid) for share;
+  if found and closed is not null then raise exception 'La serata è chiusa'; end if;
+  if tg_op='DELETE' then return old; end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_event_settlement_lock on public.settlements;
+create trigger trg_event_settlement_lock before insert or update or delete on public.settlements
+  for each row execute function bausplit_private.lock_event_settlement();
+
 -- Chiusura di un gruppo, con possibilità di spostare il saldo rimanente in un altro gruppo
 -- in cui siano presenti tutti gli utenti coinvolti nel saldo rimanente
 create or replace function public.close_expense_group(
@@ -1529,11 +1661,13 @@ begin
       raise exception 'Il gruppo di destinazione è chiuso: scegli un gruppo attivo';
     end if;
 
-    if jsonb_typeof(p_transfers) <> 'array' or jsonb_array_length(p_transfers) < 1 then
+    if v_target.quick_creator_seat is not null then raise exception 'Scegli un gruppo ordinario come destinazione, non una serata'; end if;
+
+    if jsonb_typeof(p_transfers) is distinct from 'array' or jsonb_array_length(p_transfers) < 1 then
       raise exception 'Non ci sono saldi rimanenti da trasferire';
     end if;
 
-    if p_exchange_rate is null or p_exchange_rate <= 0 then
+    if p_exchange_rate is null or p_exchange_rate <= 0 or p_exchange_rate >= 1e10 then
       raise exception 'Tasso di cambio non valido';
     end if;
 
@@ -1549,15 +1683,31 @@ begin
       v_src_amt := round((v_item->>'source_amount')::numeric, 2);
       v_dst_amt := round((v_item->>'target_amount')::numeric, 2);
 
-      if v_debtor = v_creditor or v_src_amt <= 0 or v_dst_amt <= 0 then
+      if v_debtor is null or v_creditor is null or v_debtor = v_creditor
+        or v_src_amt is null or v_dst_amt is null or v_src_amt <= 0 or v_dst_amt <= 0
+        or v_src_amt = 'NaN'::numeric or v_dst_amt = 'NaN'::numeric then
         raise exception 'Dati di trasferimento saldo non validi';
       end if;
 
-      -- Verifica che entrambi gli utenti coinvolti siano membri attivi del gruppo di destinazione
-      select dst.user_id into v_target_debtor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
-        where src.group_id = v_source.id and src.user_id = v_debtor and dst.group_id = v_target.id and dst.left_at is null;
-      select dst.user_id into v_target_creditor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
-        where src.group_id = v_source.id and src.user_id = v_creditor and dst.group_id = v_target.id and dst.left_at is null;
+      if v_source.quick_creator_seat is not null then
+        if jsonb_array_length(p_transfers) <> 1 or v_source.quick_creator_seat not in (v_debtor,v_creditor) then
+          raise exception 'Registra prima i rimborsi degli amici: si può riportare solo il residuo della coppia';
+        end if;
+        select case when v_debtor=v_source.quick_creator_seat then t.target_self else t.target_peer end,
+               case when v_creditor=v_source.quick_creator_seat then t.target_self else t.target_peer end
+          into v_target_debtor,v_target_creditor from public.get_quick_event_matches(v_source.id) t
+          where t.group_id=v_target.id and t.can_carry and t.peer_id=case when v_debtor=v_source.quick_creator_seat then v_creditor else v_debtor end;
+        if not found then raise exception 'Gruppo di coppia o partecipanti non più disponibili per il riporto'; end if;
+        if v_dst_amt is distinct from round(v_src_amt*v_fx,case when v_target.base_currency in ('JPY','KRW','ISK') then 0 else 2 end) then
+          raise exception 'Importo convertito non valido: controlla il cambio prima di confermare';
+        end if;
+      else
+        -- Verifica che entrambi gli utenti coinvolti siano membri attivi del gruppo di destinazione
+        select dst.user_id into v_target_debtor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
+          where src.group_id = v_source.id and src.user_id = v_debtor and dst.group_id = v_target.id and dst.left_at is null;
+        select dst.user_id into v_target_creditor from public.group_members src join public.group_members dst on dst.owner_id = src.owner_id
+          where src.group_id = v_source.id and src.user_id = v_creditor and dst.group_id = v_target.id and dst.left_at is null;
+      end if;
       if v_target_debtor is null or v_target_creditor is null then
         raise exception 'Tutti gli utenti coinvolti nel saldo rimanente devono far parte del gruppo "%"', v_target.name;
       end if;
@@ -1742,12 +1892,18 @@ begin
     v_summary := format('Ha collegato il profilo ospite di %s al proprio account', coalesce(v_guest.display_name, v_guest_name));
     if v_existing.user_id is not null and (v_existing.left_at is null or v_guest.left_at is not null) then
       v_summary := v_summary || '. Il posto dell’account resta attivo; le quote del precedente nome restano distinte.';
+      if v_existing.left_at is null then
+        update public.expense_groups set quick_creator_seat=v_existing.user_id
+          where id=v_guest.group_id and quick_creator_seat=v_guest.user_id;
+      end if;
       -- Entrambi già presenti: resta il posto dell'account. Il secondo saldo non viene cancellato né sommato di nascosto.
       update public.group_members set owner_id = null, left_at = coalesce(left_at, now()),
         display_name = coalesce(display_name, v_guest_name)
         where group_id = v_guest.group_id and user_id = v_guest.user_id;
     else
       if v_existing.user_id is not null then
+        update public.expense_groups set quick_creator_seat=v_guest.user_id
+          where id=v_guest.group_id and quick_creator_seat=v_existing.user_id;
         -- L'account era già uscito: conserva il posto attivo dell'ospite, senza riattivare quello vecchio.
         update public.group_members set owner_id = null, display_name = coalesce(display_name,
           (select display_name from public.profiles where id = v_account))

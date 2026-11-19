@@ -1,6 +1,5 @@
 import { Check, Copy, Database, ExternalLink, RefreshCw } from 'lucide-react';
-import { useState } from 'react';
-import schemaSql from '../../supabase/schema.sql?raw';
+import { useEffect, useState } from 'react';
 import { getAppBaseUrl, getSupabaseProjectRef } from '../lib/supabase';
 
 interface SetupGuideCardProps {
@@ -9,6 +8,17 @@ interface SetupGuideCardProps {
 }
 
 export function SetupGuideCard({ onRetry, retrying }: SetupGuideCardProps) {
+  // Lo script di amministrazione non deve appesantire l'apertura di ogni serata.
+  const [schemaSql, setSchemaSql] = useState('');
+  const [sqlUnavailable, setSqlUnavailable] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    import('../../supabase/schema.sql?raw').then(
+      (file) => { if (mounted) setSchemaSql(file.default); },
+      () => { if (mounted) setSqlUnavailable(true); }
+    );
+    return () => { mounted = false; };
+  }, []);
   const [copied, setCopied] = useState(false);
   const [showSql, setShowSql] = useState(false);
 
@@ -83,7 +93,7 @@ export function SetupGuideCard({ onRetry, retrying }: SetupGuideCardProps) {
       </ol>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-primary" onClick={handleCopy}>
+        <button type="button" className="btn btn-primary" onClick={handleCopy} disabled={!schemaSql}>
           {copied ? <Check size={16} /> : <Copy size={16} />}
           {copied ? 'Script SQL copiato!' : 'Copia script SQL'}
         </button>
@@ -94,12 +104,16 @@ export function SetupGuideCard({ onRetry, retrying }: SetupGuideCardProps) {
         <button
           type="button"
           className="btn btn-ghost"
+          disabled={!schemaSql}
           onClick={() => setShowSql((v) => !v)}
         >
           {showSql ? 'Nascondi codice' : 'Mostra codice SQL'}
         </button>
       </div>
 
+      {sqlUnavailable && <p className="field-hint">Non è stato possibile caricare lo script.
+        {' '}<a href="https://github.com/SylarPower/BauSplit/blob/main/supabase/schema.sql" target="_blank" rel="noreferrer">Apri schema.sql nel repository</a>.
+      </p>}
       {showSql && <pre className="sql-preview">{schemaSql}</pre>}
     </div>
   );

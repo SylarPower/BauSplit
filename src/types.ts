@@ -51,6 +51,7 @@ export interface GroupMember {
 }
 
 export interface ExpenseGroup {
+  quickCreatorSeat: string | null; // null = gruppo ordinario
   id: string;
   name: string;
   description: string;
@@ -194,7 +195,25 @@ export interface GroupOverview {
   counterpartHint: string; // es. "Giulia ti deve 42,50 €" o "In pari"
 }
 
+export interface QuickPersonInput {
+  name: string;
+  source?: { groupId: string; seatId: string }; // solo se scelto dai propri gruppi
+}
+export interface QuickEventInput {
+  name: string;
+  baseCurrency: string;
+  people: QuickPersonInput[];
+}
+/** Corrispondenza fra un posto della serata e uno dei gruppi condivisi del creatore. */
+export interface QuickEventMatch {
+  peerId: string;
+  groupId: string;
+  seatId: string;
+  canCarry: boolean;
+}
+
 export interface GroupData {
+  quickMatches?: QuickEventMatch[];
   group: ExpenseGroup;
   members: GroupMember[]; // tutti i membri (attivi e usciti per risolvere i nomi storici)
   categories: CategoryOption[]; // catalogo del gruppo, incluse quelle nascoste
