@@ -1896,3 +1896,15 @@ textarea.input { height: auto; resize: vertical; }
 .close-mode .segmented-btn { min-height: 44px; height: auto; padding: 5px 8px; line-height: 1.25; }
 .quick-aliases summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 .quick-aliases .field { margin-top: 8px; }
+
+/* Impostazioni del creatore: l’anteprima resta accanto alla persona scelta. */
+.creator-people { padding: 0; margin: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.creator-person { min-width: 0; padding: 7px 10px; }
+.creator-person + .creator-person { border-top: 1px solid var(--border); }
+.creator-person-head { display: flex; gap: 8px; align-items: center; }
+.creator-person-label { flex: 1; min-width: 0; display: grid; font-size: 14px; overflow-wrap: anywhere; }
+.creator-person-tools { display: flex; flex: none; }
+.creator-person-tools .btn-icon { width: 44px; height: 44px; }
+.creator-confirm { display: grid; gap: 8px; margin: 6px 0; background: var(--surface-subtle); border-radius: var(--radius-sm); padding: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.creator-confirm .btn { min-height: 44px; }
+.creator-summary { cursor: pointer; font-size: 14px; padding-block: 10px; }

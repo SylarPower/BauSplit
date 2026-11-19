@@ -48,9 +48,12 @@ export interface GroupMember {
   displayName: string;
   joinedAt: string;
   leftAt: string | null;
+  removedAt?: string | null; // rimozione del creatore, distinta dall’uscita volontaria
 }
 
 export interface ExpenseGroup {
+  creatorOwnerId?: string; // assente con lo schema precedente; non usare il nome o createdBy come ripiego
+  everShared?: boolean;
   quickCreatorSeat: string | null; // null = gruppo ordinario
   id: string;
   name: string;
@@ -225,7 +228,7 @@ export interface GroupData {
 
 export interface InvitePreview {
   valid: boolean;
-  reason?: 'not_found' | 'disabled' | 'closed';
+  reason?: 'not_found' | 'disabled' | 'closed' | 'revoked';
   groupId?: string;
   groupName?: string;
   description?: string;
@@ -235,6 +238,26 @@ export interface InvitePreview {
   alreadyMember?: boolean;
   availableNames?: { id: string; name: string }[];
   returningName?: string;
+}
+
+/** Anteprime restituite dal DB e ripresentate senza modifiche alla conferma. */
+export interface RemovalPreview {
+  groupId: string;
+  seatId: string;
+  ownerId: string | null;
+  name: string;
+  mode: 'delete' | 'retire' | 'revoke';
+  balance: number;
+  pauseCount: number;
+}
+export interface DeletionPreview {
+  groupId: string;
+  name: string;
+  people: number;
+  expenses: number;
+  refunds: number;
+  recurring: number;
+  activities: number;
 }
 
 export interface CreateGroupInput {

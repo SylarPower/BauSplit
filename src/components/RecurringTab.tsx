@@ -34,6 +34,7 @@ import type {
 import { Avatar, CategoryIcon } from './Icon';
 import { Modal } from './Modal';
 import { RateInput } from './RateInput';
+import { reviewSelection, ReviewParticipants } from './ReviewParticipants';
 
 interface RecurringTabProps {
   groupId: string;
@@ -92,6 +93,9 @@ export function RecurringTab({
   const [formError, setFormError] = useState<string | null>(null);
   const categories = useMemo(() => entryCategories(catalog, editing), [catalog, editing]);
   const selectedCategory = categories.find((c) => c.key === categoryKey);
+  const activeIds = new Set(activeMembers.map((m) => m.userId));
+  const needsParticipantReview = (rec: RecurringExpense) =>
+    !activeIds.has(rec.paidBy) || rec.splits.some((s) => !activeIds.has(s.userId));
 
   // La sincronizzazione non deve resettare i campi già compilati.
   const initializedKeyRef = useRef<string | null>(null);
@@ -115,9 +119,9 @@ export function RecurringTab({
       setCurrency(editing.currency);
       setFixedQuote(directQuote(editing.fixedExchangeRate));
       setCategoryKey(editing.category);
-      setPaidBy(editing.paidBy);
+      setPaidBy(defaultIds.includes(editing.paidBy) ? editing.paidBy : '');
       setSplitMode(editing.splitMode);
-      setSelectedIds(editing.splits.map((s) => s.userId));
+      setSelectedIds(editing.splits.map((s) => s.userId).filter((id) => defaultIds.includes(id)));
       const ex: Record<string, string> = {};
       const pc: Record<string, string> = {};
       editing.splits.forEach((s) => {
@@ -187,8 +191,10 @@ export function RecurringTab({
     [parsedAmount, currency, splitMode, selectedIds, exactNumbers, pctNumbers]
   );
 
+  const review = reviewSelection(activeMembers, paidBy, selectedIds);
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (review.changed) return;
     setFormError(null);
 
     if (!description.trim()) {
@@ -197,6 +203,10 @@ export function RecurringTab({
     }
     if (parsedAmount <= 0) {
       setFormError('Inserisci un importo valido maggiore di zero.');
+      return;
+    }
+    if (!paidBy) {
+      setFormError('Controlla pagante e quote: scegli solo partecipanti attivi.');
       return;
     }
     if (!splitCalc.valid) {
@@ -331,6 +341,7 @@ export function RecurringTab({
           {recurringExpenses.map((rec) => {
             const cat = resolveCategoryDisplay(rec.category, rec.categoryLabel, catalog);
             const isBusy = busyId === rec.id;
+            const needsReview = needsParticipantReview(rec);
 
             return (
               <div
@@ -386,6 +397,11 @@ export function RecurringTab({
                   </div>
                 </div>
 
+                {needsReview && (
+                  <p className="field-hint">
+                    Modifica pagante e quote: questa ricorrenza include un ex partecipante.
+                  </p>
+                )}
                 {confirmDeleteId === rec.id ? (
                   <div
                     className="alert alert-error"
@@ -434,7 +450,7 @@ export function RecurringTab({
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      disabled={isBusy}
+                      disabled={isBusy || needsReview}
                       onClick={() => handleAction(rec.id, () => onRunNow(rec))}
                       title={`Registra subito la scadenza del ${formatFullDateIT(rec.nextDueDate)}`}
                     >
@@ -444,7 +460,7 @@ export function RecurringTab({
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      disabled={isBusy}
+                      disabled={isBusy || (needsReview && !rec.active)}
                       onClick={() => handleAction(rec.id, () => onToggleActive(rec, !rec.active))}
                     >
                       {rec.active ? <Pause size={13} /> : <Play size={13} />}
@@ -503,7 +519,7 @@ export function RecurringTab({
               type="submit"
               form="recurring-form"
               className="btn btn-primary"
-              disabled={saving}
+              disabled={saving || review.changed}
             >
               {saving ? 'Salvataggio…' : editing ? 'Salva modifiche' : 'Crea ricorrenza'}
             </button>
@@ -512,6 +528,20 @@ export function RecurringTab({
       >
         <form id="recurring-form" className="form-stack" onSubmit={handleSubmit}>
           {formError && <div className="alert alert-error">{formError}</div>}
+          {review.changed && (
+            <ReviewParticipants
+              onReview={() => {
+                setSelectedIds(review.ids);
+                setPaidBy(review.payer);
+              }}
+            />
+          )}
+          {editing && needsParticipantReview(editing) && (
+            <p className="alert alert-info">
+              La ricorrenza includeva un ex partecipante. Controlla il pagante e le nuove quote
+              prima di salvare: le spese precedenti non cambiano.
+            </p>
+          )}
 
           <label className="field">
             <span className="field-label">Descrizione</span>
@@ -640,7 +670,13 @@ export function RecurringTab({
 
           <label className="field">
             <span className="field-label">Pagato da</span>
-            <select className="select" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+            <select
+              required
+              className="select"
+              value={paidBy}
+              onChange={(e) => setPaidBy(e.target.value)}
+            >
+              {!paidBy && <option value="">Scegli il pagante</option>}
               {activeMembers.map((m) => (
                 <option key={m.userId} value={m.userId}>
                   {m.displayName}

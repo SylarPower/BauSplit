@@ -235,14 +235,18 @@ export function GroupsHomeView({
                         ? 'Gruppo chiuso'
                         : pendingInvite.preview?.reason === 'disabled'
                           ? "Link d'invito disattivato"
-                          : "Link d'invito non valido"}
+                          : pendingInvite.preview?.reason === 'revoked'
+                            ? 'Accesso revocato'
+                            : "Link d'invito non valido"}
                     </div>
                     <div className="field-hint">
                       {pendingInvite.preview?.reason === 'closed'
                         ? 'Questo gruppo è stato chiuso e non accetta nuovi membri.'
                         : pendingInvite.preview?.reason === 'disabled'
                           ? 'I membri di questo gruppo hanno temporaneamente disattivato gli inviti.'
-                          : 'Il link potrebbe essere stato rigenerato. Chiedi un nuovo link a chi ti ha invitato.'}
+                          : pendingInvite.preview?.reason === 'revoked'
+                            ? 'Per rientrare serve il permesso di chi ha creato il gruppo.'
+                            : 'Il link potrebbe essere stato rigenerato. Chiedi un nuovo link a chi ti ha invitato.'}
                     </div>
                   </div>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={onDeclineInvite}>

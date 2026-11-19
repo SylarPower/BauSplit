@@ -970,20 +970,10 @@ export class DemoRepository {
 
     const memberRow = members.find((m) => m.userId === uid && m.leftAt === null);
     if (!memberRow) throw new Error('Non fai parte di questo gruppo.');
-    memberRow.leftAt = new Date().toISOString();
-
-    const remaining = members.filter((m) => m.leftAt === null);
-    if (remaining.length === 0) {
-      db.groups = db.groups.filter((g) => g.id !== groupId);
-      delete db.members[groupId];
-      db.expenses = db.expenses.filter((e) => e.groupId !== groupId);
-      db.settlements = db.settlements.filter((s) => s.groupId !== groupId);
-      db.recurringExpenses = db.recurringExpenses.filter((r) => r.groupId !== groupId);
-      db.customCategories = db.customCategories.filter((c) => c.groupId !== groupId);
-      db.activityLogs = db.activityLogs.filter((l) => l.groupId !== groupId);
-      saveDb(db);
-      return { groupDeleted: true };
+    if (members.filter(m => m.leftAt === null).length === 1) {
+      throw new Error('Sei l’ultimo partecipante: per conservare lo storico usa la chiusura del gruppo');
     }
+    memberRow.leftAt = new Date().toISOString();
 
     const summary =
       Math.abs(myNet) < 0.01

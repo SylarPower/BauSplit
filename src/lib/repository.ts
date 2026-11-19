@@ -5,6 +5,8 @@ import type {
   CategoryOption,
   CategoryPatch,
   CreateGroupInput,
+  DeletionPreview,
+  RemovalPreview,
   QuickEventInput,
   QuickPersonInput,
   InviteChoice,
@@ -50,7 +52,16 @@ import {
 } from './recurring';
 import { supabase } from './supabase';
 
-export interface DataRepository {
+export interface CreatorRepository {
+  previewRemoval(groupId: string, seatId: string): Promise<RemovalPreview>;
+  removeParticipant(preview: RemovalPreview): Promise<void>;
+  renameParticipant(groupId: string, seatId: string, name: string): Promise<void>;
+  allowParticipantReturn(groupId: string, seatId: string): Promise<void>;
+  previewDeletion(groupId: string): Promise<DeletionPreview>;
+  deletePersonalGroup(preview: DeletionPreview): Promise<void>;
+}
+
+export interface DataRepository extends CreatorRepository {
   ensureProfile(): Promise<UserProfile>;
   updateProfileName(userId: string, displayName: string): Promise<UserProfile>;
 
@@ -248,9 +259,13 @@ export async function processDueRecurringExpenses(params: {
         .map((e) => e.recurringOccurrenceDate as string)
     );
 
-    const participantIds = rec.splits
-      .map((s) => s.userId)
-      .filter((id) => activeMemberIds.has(id) || nameMap.has(id));
+    const participantIds = rec.splits.map((s) => s.userId);
+    if (!activeMemberIds.has(rec.paidBy) || participantIds.some((id) => !activeMemberIds.has(id))) {
+      // Non addebitare agli ex membri e non redistribuire le loro quote in automatico.
+      if (forceSingleOccurrence)
+        throw new Error('Aggiorna pagante e quote della ricorrenza prima di registrarla.');
+      continue;
+    }
     if (participantIds.length === 0) continue;
 
     const exactAmounts: Record<string, number> = {};
@@ -356,6 +371,8 @@ function mapSettlementKind(v: unknown): SettlementKind {
 function mapGroup(row: Record<string, unknown>): ExpenseGroup {
   return {
     id: String(row.id),
+    creatorOwnerId: row.creator_owner_id ? String(row.creator_owner_id) : undefined,
+    everShared: Boolean(row.ever_shared),
     quickCreatorSeat: row.quick_creator_seat ? String(row.quick_creator_seat) : null,
     name: String(row.name ?? ''),
     description: String(row.description ?? ''),
@@ -372,14 +389,27 @@ function mapGroup(row: Record<string, unknown>): ExpenseGroup {
   };
 }
 
-const MEMBER_COLUMNS = 'group_id, user_id, owner_id, display_name, joined_at, left_at, profiles!group_members_owner_id_fkey(display_name)';
+const MEMBER_COLUMNS = '*, profiles!group_members_owner_id_fkey(display_name)';
 
 type DisplayProfile = { display_name: string };
-function mapMember(row: { user_id: string; owner_id: string | null; display_name: string | null;
-  joined_at: string; left_at: string | null; profiles: DisplayProfile | DisplayProfile[] | null }): GroupMember {
+function mapMember(row: {
+  user_id: string;
+  owner_id: string | null;
+  display_name: string | null;
+  joined_at: string;
+  left_at: string | null;
+  removed_at?: string | null;
+  profiles: DisplayProfile | DisplayProfile[] | null;
+}): GroupMember {
   const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-  return { userId: row.user_id, ownerId: row.owner_id, displayName: row.display_name ?? profile?.display_name ?? 'Membro',
-    joinedAt: row.joined_at, leftAt: row.left_at };
+  return {
+    userId: row.user_id,
+    ownerId: row.owner_id,
+    displayName: row.display_name ?? profile?.display_name ?? 'Membro',
+    joinedAt: row.joined_at,
+    leftAt: row.left_at,
+    removedAt: row.removed_at ?? null,
+  };
 }
 
 function quickPeoplePayload(people: QuickPersonInput[]) {
@@ -602,6 +632,57 @@ export class SupabaseRepository implements DataRepository {
     }
   }
 
+  async previewRemoval(groupId: string, seatId: string): Promise<RemovalPreview> {
+    const { data, error } = await this.client.rpc('creator_action_preview', {
+      p_group_id: groupId,
+      p_member_id: seatId,
+    });
+    if (error) throw error;
+    return data as RemovalPreview;
+  }
+
+  async removeParticipant(preview: RemovalPreview) {
+    const { error } = await this.client.rpc('remove_group_participant', {
+      p_group_id: preview.groupId,
+      p_member_id: preview.seatId,
+      p_confirmation: preview,
+    });
+    if (error) throw error;
+  }
+
+  async renameParticipant(groupId: string, seatId: string, name: string) {
+    const { error } = await this.client.rpc('rename_group_participant', {
+      p_group_id: groupId,
+      p_member_id: seatId,
+      p_name: name.trim(),
+    });
+    if (error) throw error;
+  }
+
+  async allowParticipantReturn(groupId: string, seatId: string) {
+    const { error } = await this.client.rpc('allow_participant_return', {
+      p_group_id: groupId,
+      p_member_id: seatId,
+    });
+    if (error) throw error;
+  }
+
+  async previewDeletion(groupId: string): Promise<DeletionPreview> {
+    const { data, error } = await this.client.rpc('creator_action_preview', {
+      p_group_id: groupId,
+    });
+    if (error) throw error;
+    return data as DeletionPreview;
+  }
+
+  async deletePersonalGroup(preview: DeletionPreview) {
+    const { error } = await this.client.rpc('delete_personal_group', {
+      p_group_id: preview.groupId,
+      p_confirmation: preview,
+    });
+    if (error) throw error;
+  }
+
   async leaveGroup(groupId: string): Promise<{ groupDeleted: boolean }> {
     const { data, error } = await this.client.rpc('leave_group', { p_group_id: groupId });
     if (error) throw error;
@@ -687,11 +768,9 @@ export class SupabaseRepository implements DataRepository {
       return {
         valid: false,
         reason:
-          raw.reason === 'disabled'
-            ? 'disabled'
-            : raw.reason === 'closed'
-              ? 'closed'
-              : 'not_found',
+          raw.reason === 'disabled' || raw.reason === 'closed' || raw.reason === 'revoked'
+            ? raw.reason
+            : 'not_found',
       };
     }
     return {
@@ -780,6 +859,8 @@ export class SupabaseRepository implements DataRepository {
         .limit(300),
     ]);
 
+    if (groupRes.error?.code === 'PGRST116')
+      throw new Error('Il conto non è più disponibile o non hai più accesso.');
     if (groupRes.error) throw groupRes.error;
     if (membersRes.error) throw membersRes.error;
     if (catRes.error) throw catRes.error;

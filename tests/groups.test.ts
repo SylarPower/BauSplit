@@ -676,3 +676,404 @@ describe('Storico e identità della serata', () => {
     await expect(quickEvent()).rejects.toThrow(/permission denied/i);
   });
 });
+
+// Lo stesso contratto della UI; l'anteprima non modifica partecipanti o movimenti.
+const impact = async (gid: string, seat: string | null = null) =>
+  (
+    await first<{ p: Record<string, unknown> }>('select creator_action_preview($1,$2) p', [
+      gid,
+      seat,
+    ])
+  ).p;
+const remove = (gid: string, seat: string, confirmation: unknown) =>
+  db.query('select remove_group_participant($1,$2,$3)', [gid, seat, JSON.stringify(confirmation)]);
+const destroy = (gid: string, confirmation: unknown) =>
+  db.query('select delete_personal_group($1,$2)', [gid, JSON.stringify(confirmation)]);
+const rename = (gid: string, seat: string, name: string) =>
+  db.query('select rename_group_participant($1,$2,$3)', [gid, seat, name]);
+const permit = (gid: string, seat: string) =>
+  db.query('select allow_participant_return($1,$2)', [gid, seat]);
+const refund = (gid: string, from: string, to: string, n: number) =>
+  db.query(
+    `insert into settlements(group_id,from_user,to_user,amount,base_amount,currency,created_by,updated_by)
+  values($1,$2,$3,$4,$4,'EUR',auth.uid(),auth.uid())`,
+    [gid, from, to, n]
+  );
+const recurring = (gid: string, payer: string, seats: string[]) =>
+  first<{ id: string }>(
+    `insert into recurring_expenses
+  (group_id,description,amount,currency,paid_by,split_mode,splits,frequency,start_date,next_due_date,created_by,updated_by)
+  values($1,'Abbonamento',10,'EUR',$2,'equal',$3,'monthly',current_date,current_date,auth.uid(),auth.uid()) returning id`,
+    [gid, payer, JSON.stringify(seats.map((userId) => ({ userId })))]
+  );
+const tableRows = async (table: string, gid: string) =>
+  (await db.query(`select * from ${table} where group_id=$1 order by id`, [gid])).rows;
+const newGroup = (kind: 'gruppo' | 'serata', people: string[]) =>
+  kind === 'gruppo' ? createGroup('Viaggio', people) : quickEvent(people.map((name) => ({ name })));
+
+describe('Poteri del creatore', () => {
+  it.each(['gruppo', 'serata'] as const)(
+    '%s: rimuovere Sara non trasforma la cena per quattro in una cena per tre',
+    async (kind) => {
+      await as(guest);
+      const g = await newGroup(kind, ['Giulia', 'Luca', 'Sara', 'Refuso']);
+      const me = (await member(g.id, guest)).user_id;
+      const [b, c, d, typo] = await Promise.all(
+        ['Giulia', 'Luca', 'Sara', 'Refuso'].map(
+          async (name) => (await seatByName(g.id, name)).user_id
+        )
+      );
+      const empty = await impact(g.id, typo);
+      expect(empty).toMatchObject({ mode: 'delete', balance: 0, ownerId: null });
+      await remove(g.id, typo, empty);
+      expect(await seatByName(g.id, 'Refuso')).toBeUndefined();
+      await eventExpense(g.id, 'Cena', 80, me, [me, b, c, d]);
+      await eventExpense(g.id, 'Taxi', 18, d, [me, d]); // Sara deve 20 per la cena, ma ha anticipato 9 per Anna
+      const stale = await impact(g.id, d);
+      expect(stale).toMatchObject({ name: 'Sara', mode: 'retire', balance: -11 });
+      await refund(g.id, d, me, 3);
+      await expect(remove(g.id, d, stale)).rejects.toThrow(/cambiati/);
+      const before = await Promise.all(
+        ['expenses', 'expense_splits', 'settlements'].map((t) => tableRows(t, g.id))
+      );
+      const confirmed = await impact(g.id, d);
+      expect(confirmed.balance).toBe(-8);
+      await remove(g.id, d, confirmed);
+      expect(
+        await Promise.all(
+          ['expenses', 'expense_splits', 'settlements'].map((t) => tableRows(t, g.id))
+        )
+      ).toEqual(before);
+      expect((await preview(g.invite_token)).available_names.map((p) => p.id)).not.toContain(d);
+      expect(
+        await first(
+          'select left_at is not null as inactive,removed_at is not null as removed from group_members where group_id=$1 and user_id=$2',
+          [g.id, d]
+        )
+      ).toEqual({ inactive: true, removed: true });
+      await expect(
+        eventExpense(g.id, 'Nuova con Sara', 10, me, [me, d.toUpperCase()])
+      ).rejects.toThrow(/non è più attivo/);
+      await expect(eventExpense(g.id, 'Nuova pagata da Sara', 10, d, [me])).rejects.toThrow(
+        /non è più attivo/
+      );
+      await refund(g.id, d, me, 8); // una controparte non attiva resta saldabile
+      expect(await tableRows('settlements', g.id)).toHaveLength(2);
+      const historical = await first<{ id: string }>(
+        "select id from expenses where group_id=$1 and description='Cena'",
+        [g.id]
+      );
+      await db.query(
+        `select save_expense($1,$2,'Cena corretta',80,'EUR',1,current_date,false,80,current_date,'altro','Altro',$3,'equal','',$4,'updated','Nota')`,
+        [
+          g.id,
+          historical.id,
+          me,
+          JSON.stringify(
+            [me, b, c, d].map((user_id) => ({ user_id, amount: 20, base_amount: 20 }))
+          ),
+        ]
+      );
+      await permit(g.id, d);
+      expect(await impact(g.id, d)).toMatchObject({ seatId: d, mode: 'retire', balance: 0 });
+    }
+  );
+
+  it.each(['gruppo', 'serata'] as const)(
+    '%s: nome locale e revoca solo qui, nessun rientro col vecchio invito',
+    async (kind) => {
+      await as(guest);
+      const g = await newGroup(kind, ['Sara', 'Libero']);
+      const other = await createGroup('Altro');
+      const sara = (await seatByName(g.id, 'Sara')).user_id,
+        me = (await member(g.id, guest)).user_id;
+      const unused = await impact(g.id, sara);
+      const solo = await impact(g.id);
+      await as(friend);
+      await join(g.invite_token, sara);
+      await join(other.invite_token, null, 'Sara');
+      // Non basta essere un membro attivo. L'ID del titolare non è un input del client.
+      for (const cmd of [
+        () => impact(g.id, sara),
+        () => remove(g.id, sara, unused),
+        () => rename(g.id, me, 'X'),
+        () => permit(g.id, sara),
+        () => destroy(g.id, solo),
+      ]) {
+        await expect(cmd()).rejects.toThrow(/riservata/);
+      }
+      await expect(
+        db.query(
+          'update expense_groups set creator_owner_id=auth.uid(), ever_shared=false where id=$1',
+          [g.id]
+        )
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        db.query('update group_members set removed_at=null where group_id=$1', [g.id])
+      ).rejects.toThrow(/permission denied/i);
+      await as(guest);
+      await expect(remove(g.id, sara, unused)).rejects.toThrow(/cambiati/); // non basta la conferma per un nome mai rivendicato
+      await expect(destroy(g.id, solo)).rejects.toThrow(/accesso/);
+      await expect(impact(g.id, me)).rejects.toThrow(/tuo posto/);
+      await expect(rename(g.id, sara, ' libero ')).rejects.toThrow(/già presente/);
+      await rename(g.id, sara, '  Sa  ');
+      expect(await member(g.id, friend)).toMatchObject({ user_id: sara, display_name: 'Sa' });
+      expect(await first('select display_name from profiles where id=$1', [friend])).toEqual({
+        display_name: 'Sara',
+      });
+      expect(await member(other.id, friend)).toMatchObject({ display_name: null });
+      expect(
+        await first(
+          "select actor_name from activity_logs where group_id=$1 and actor_id=$2 and action='joined'",
+          [g.id, friend]
+        )
+      ).toEqual({ actor_name: 'Sara' });
+      const toRevoke = await impact(g.id, sara);
+      expect(toRevoke).toMatchObject({ mode: 'revoke', ownerId: friend, name: 'Sa' });
+      await remove(g.id, sara, toRevoke);
+      const fresh = (
+        await first<{ invite_token: string }>(
+          'select invite_token from expense_groups where id=$1',
+          [g.id]
+        )
+      ).invite_token;
+      expect(fresh).not.toBe(g.invite_token);
+      await as(outsider);
+      expect((await preview(g.invite_token)).valid).toBe(false);
+      await expect(join(g.invite_token, null, 'Anonimo')).rejects.toThrow(/non è valido/);
+      await as(friend);
+      expect(await countGroups(g.id)).toBe(0);
+      expect(await countGroups(other.id)).toBe(1);
+      expect(await preview(fresh)).toEqual({ valid: false, reason: 'revoked' });
+      await expect(join(fresh, null, 'Altro nome')).rejects.toThrow(/autorizzare/);
+      await expect(eventExpense(g.id, 'Dopo la revoca', 4, me, [sara])).rejects.toThrow(/ccesso/);
+      await expect(db.query('select regenerate_group_invite($1)', [g.id])).rejects.toThrow(
+        /ccesso/
+      );
+      await as(guest);
+      await permit(g.id, sara);
+      await as(friend);
+      expect(await countGroups(g.id)).toBe(0); // autorizzare non dà accesso automaticamente
+      await expect(join(g.invite_token, sara)).rejects.toThrow(/non è valido/);
+      await join(fresh, null, 'Altro nome');
+      expect(await member(g.id, friend)).toMatchObject({
+        user_id: sara,
+        left_at: null,
+        display_name: 'Sa',
+      });
+    }
+  );
+
+  it('una ricorrenza non viene redistribuita o riattivata di nascosto (incluse quote solo JSON e pagante)', async () => {
+    await as(guest);
+    const g = await createGroup('Casa', ['Sara', 'Luca', 'Rimborso']);
+    const me = (await member(g.id, guest)).user_id,
+      sara = (await seatByName(g.id, 'Sara')).user_id,
+      luca = (await seatByName(g.id, 'Luca')).user_id;
+    const r = await recurring(g.id, me, [sara, luca]);
+    const paid = await recurring(g.id, sara, [me]);
+    const ok = await recurring(g.id, luca, [me]);
+    const p = await impact(g.id, sara);
+    expect(p).toMatchObject({ mode: 'retire', balance: 0, pauseCount: 2 });
+    await remove(g.id, sara, p);
+    expect(await first('select active,splits from recurring_expenses where id=$1', [r.id])).toEqual(
+      { active: false, splits: [{ userId: sara }, { userId: luca }] }
+    );
+    expect(await first('select active from recurring_expenses where id=$1', [paid.id])).toEqual({
+      active: false,
+    });
+    expect(await first('select active from recurring_expenses where id=$1', [ok.id])).toEqual({
+      active: true,
+    });
+    await expect(
+      db.query('update recurring_expenses set active=true where id=$1', [r.id])
+    ).rejects.toThrow(/non più attivi/);
+    await expect(recurring(g.id, sara, [me])).rejects.toThrow(/non più attivi/);
+    await db.query('update recurring_expenses set active=true, splits=$2 where id=$1', [
+      r.id,
+      JSON.stringify([{ userId: luca }]),
+    ]);
+    // Anche con saldo zero e rimborso storico eliminato non si torna a essere un refuso.
+    const old = (await seatByName(g.id, 'Rimborso')).user_id;
+    await refund(g.id, me, old, 4);
+    expect(await impact(g.id, old)).toMatchObject({ mode: 'retire', balance: -4 });
+    await db.query('delete from settlements where group_id=$1', [g.id]);
+    expect(await impact(g.id, old)).toMatchObject({ mode: 'retire', balance: 0 });
+  });
+
+  it.each(['gruppo', 'serata'] as const)(
+    '%s: solo creatore, più nomi e movimenti: eliminazione intenzionale anche in archivio',
+    async (kind) => {
+      await as(guest);
+      const g = await newGroup(kind, ['B', 'C']);
+      const other = await createGroup('Non toccare');
+      const a = (await member(g.id, guest)).user_id,
+        b = (await seatByName(g.id, 'B')).user_id,
+        c = (await seatByName(g.id, 'C')).user_id;
+      const stale = await impact(g.id);
+      await eventExpense(g.id, 'Panini', 15, a, [a, b, c]);
+      await refund(g.id, b, a, 5);
+      if (kind === 'gruppo') await recurring(g.id, c, [a]);
+      await expect(destroy(g.id, stale)).rejects.toThrow(/cambiato/);
+      await db.query('select close_expense_group($1)', [g.id]);
+      const p = await impact(g.id);
+      expect(p).toMatchObject({
+        people: 3,
+        expenses: 1,
+        refunds: 1,
+        recurring: kind === 'gruppo' ? 1 : 0,
+      });
+      await db.query('select authorize_guest_link($1)', [account]);
+      await as(account);
+      await db.query('select link_guest_groups($1)', [guest]);
+      await as(guest);
+      await expect(destroy(g.id, p)).rejects.toThrow(/riservata/);
+      await as(account);
+      await destroy(g.id, await impact(g.id));
+      // RLS potrebbe nascondere righe orfane: controlla fisicamente anche le tabelle figlie.
+      await db.exec('reset role');
+      expect(await countGroups(g.id)).toBe(0);
+      expect(await countGroups(other.id)).toBe(1);
+      for (const t of [
+        'expenses',
+        'expense_splits',
+        'settlements',
+        'recurring_expenses',
+        'activity_logs',
+        'group_members',
+      ])
+        expect((await db.query(`select from ${t} where group_id=$1`, [g.id])).rows).toHaveLength(0);
+    }
+  );
+
+  it('nessuna eliminazione indiretta dopo un accesso o un riporto, per entrambe le estremità e dopo riapertura', async () => {
+    await as(guest);
+    const home = await createGroup('Casa', ['Giulia']);
+    const partner = (await seatByName(home.id, 'Giulia')).user_id;
+    const ev = await quickEvent([{ name: 'G', group_id: home.id, user_id: partner }]);
+    const guestSeat = (await seatByName(ev.id, 'G')).user_id;
+    await eventExpense(ev.id, 'Cinema', 12, ev.quick_creator_seat, [
+      ev.quick_creator_seat,
+      guestSeat,
+    ]);
+    const source = await impact(ev.id),
+      dest = await impact(home.id);
+    await carryPair(ev.id, home.id, guestSeat, ev.quick_creator_seat, 6);
+    await db.query('select reopen_expense_group($1)', [ev.id]);
+    // Togliere l'ultimo nome contabile non può sbloccare la cancellazione del riporto.
+    for (const [g, seat, old] of [
+      [ev.id, guestSeat, source],
+      [home.id, partner, dest],
+    ] as const) {
+      expect((await impact(g, seat)).mode).toBe('retire');
+      await remove(g, seat, await impact(g, seat));
+      await expect(destroy(g, old)).rejects.toThrow(/riporto/);
+      await expect(db.query('select leave_group($1)', [g])).rejects.toThrow(/ultimo/);
+      expect(await tableRows('settlements', g)).toHaveLength(1);
+    }
+    const shared = await createGroup('Condiviso');
+    await as(friend);
+    await join(shared.invite_token, null, 'Sara');
+    await db.query('select leave_group($1)', [shared.id]);
+    await as(guest);
+    await expect(impact(shared.id)).rejects.toThrow(/accesso/);
+    await expect(db.query('select leave_group($1)', [shared.id])).rejects.toThrow(/ultimo/);
+    await db.query('select close_expense_group($1)', [shared.id]);
+    expect(await countGroups(shared.id)).toBe(1);
+  });
+
+  it('la revoca segue il collegamento ospite → account senza intaccare altri gruppi o il creatore', async () => {
+    await as(guest);
+    const g = await quickEvent(['Sara', 'B'].map((name) => ({ name })));
+    const sara = (await seatByName(g.id, 'Sara')).user_id;
+    await as(friend);
+    await join(g.invite_token, sara);
+    const own = await createGroup('Di Sara');
+    await as(account);
+    await join(g.invite_token, null, 'Precedente posto');
+    const original = (await member(g.id, account)).user_id;
+    await as(guest);
+    await remove(g.id, sara, await impact(g.id, sara));
+    const fresh = (
+      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
+        g.id,
+      ])
+    ).invite_token;
+    await as(friend);
+    await db.query('select authorize_guest_link($1)', [account]);
+    await as(account);
+    await db.query('select link_guest_groups($1)', [friend]);
+    expect(await countGroups(g.id)).toBe(0);
+    expect(await impact(own.id)).toMatchObject({ name: 'Di Sara', people: 1 });
+    await expect(join(fresh, null, 'Nuovo')).rejects.toThrow(/non è valido/);
+    await db.exec('reset role');
+    await db.exec(schema);
+    await as(guest);
+    const latest = (
+      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
+        g.id,
+      ])
+    ).invite_token;
+    await as(account);
+    await expect(join(latest, null)).rejects.toThrow(/autorizzare/);
+    await as(guest);
+    await permit(g.id, original);
+    await as(account);
+    await join(latest, null);
+    expect((await member(g.id, account)).user_id).toBe(original);
+    await as(friend);
+    expect(await countGroups(own.id)).toBe(0);
+    await db.exec('reset role;set role anon');
+    await expect(impact(g.id)).rejects.toThrow(/permission denied/);
+  });
+
+  it('il rientro volontario resta possibile finché il creatore non revoca il posto; nemmeno l’ultimo invitato può cancellare', async () => {
+    await as(guest);
+    const g = await createGroup('Casa');
+    await as(friend);
+    await join(g.invite_token, null, 'Sara');
+    const sara = (await member(g.id, friend)).user_id;
+    await db.query('select leave_group($1)', [g.id]);
+    await join(g.invite_token, null);
+    expect((await member(g.id, friend)).user_id).toBe(sara);
+    await db.query('select leave_group($1)', [g.id]);
+    await as(guest);
+    await remove(g.id, sara, await impact(g.id, sara));
+    const token = (
+      await first<{ invite_token: string }>('select invite_token from expense_groups where id=$1', [
+        g.id,
+      ])
+    ).invite_token;
+    await as(friend);
+    await expect(join(token, null)).rejects.toThrow(/autorizzare/);
+    await as(guest);
+    await permit(g.id, sara);
+    await as(friend);
+    await join(token, null);
+    await as(guest);
+    await db.query('select leave_group($1)', [g.id]);
+    await expect(rename(g.id, sara, 'S.')).rejects.toThrow(/riservata/);
+    await as(friend);
+    await expect(destroy(g.id, {})).rejects.toThrow(/riservata/);
+    await expect(db.query('select leave_group($1)', [g.id])).rejects.toThrow(/ultimo/);
+    await db.query('select close_expense_group($1)', [g.id]);
+    expect(await countGroups(g.id)).toBe(1);
+  });
+
+  it('cancellare un’origine personale non libera il posto riservato in un’altra serata', async () => {
+    await as(guest);
+    const g = await createGroup('Origine', ['G']);
+    const original = (await seatByName(g.id, 'G')).user_id;
+    const ev = await quickEvent([{ name: 'Giulia', group_id: g.id, user_id: original }]);
+    const peer = (await seatByName(ev.id, 'Giulia')).user_id;
+    await eventExpense(ev.id, 'Pranzo', 30, ev.quick_creator_seat, [ev.quick_creator_seat, peer]);
+    await destroy(g.id, await impact(g.id));
+    expect(await tableRows('expenses', ev.id)).toHaveLength(1);
+    expect(
+      (await db.query('select * from get_quick_event_matches($1)', [ev.id])).rows
+    ).toHaveLength(0);
+    await as(outsider);
+    expect((await preview(ev.invite_token)).available_names).toEqual([]);
+    await expect(join(ev.invite_token, peer)).rejects.toThrow(/disponibile/);
+  });
+});
