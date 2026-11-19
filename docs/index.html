@@ -1,9 +1,22 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="it" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F8F8F2" />
+    <!-- Applica solo una scelta esplicita, prima di CSS/React: niente lampo chiaro al riavvio. -->
+    <style>
+      html { background: #f8f8f2; color-scheme: light; }
+      html[data-theme="amoled"] { background: #000; color-scheme: dark; }
+    </style>
+    <script>
+      try {
+        if (localStorage.getItem('bausplit:theme') === 'amoled') {
+          document.documentElement.dataset.theme = 'amoled';
+          document.querySelector('meta[name="theme-color"]').content = '#000000';
+        }
+      } catch { /* Senza storage si parte in chiaro. */ }
+    </script>
     <meta
       name="description"
       content="BauSplit — Gestisci spese condivise, saldi semplificati e rimborsi in modo minimal e chiaro."
@@ -15,11 +28,11 @@
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="manifest" href="./manifest.json" />
     <title>BauSplit</title>
-    <script type="module" crossorigin src="./assets/index-DSKSXQmN.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/icons-BuqhmUUq.js">
-    <link rel="modulepreload" crossorigin href="./assets/react-jnXfGiKx.js">
+    <script type="module" crossorigin src="./assets/index-CM9HNUvU.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/icons-Be-4tBCG.js">
+    <link rel="modulepreload" crossorigin href="./assets/react-C9s9JtJk.js">
     <link rel="modulepreload" crossorigin href="./assets/supabase-VZtnpD5M.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-BIGJT8AM.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-Bzy97cNt.css">
   </head>
   <body>
     <div id="root"></div>

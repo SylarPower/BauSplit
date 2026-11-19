@@ -2,7 +2,7 @@ import {
   ChevronRight,
   Link2,
   Plus,
-  Users,
+  PawPrint,
   Zap,
   MonitorSmartphone,
 } from 'lucide-react';
@@ -174,9 +174,16 @@ export function GroupsHomeView({
               ) : pendingInvite.preview?.valid ? (
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span className="badge badge-accent" style={{ alignSelf: 'flex-start' }}>
-                      {pendingInvite.preview.inviteRole === 'viewer' ? 'Solo visualizzazione' : 'Invito con modifica'}
-                    </span>
+                    <div className="invite-heading">
+                      <span className="badge badge-accent">
+                        {pendingInvite.preview.inviteRole === 'viewer' ? 'Solo visualizzazione' : 'Invito con modifica'}
+                      </span>
+                      {!pendingInvite.preview.alreadyMember && (
+                        <span className="pack-note">
+                          <PawPrint size={14} aria-hidden="true" /> Il branco ti aspetta
+                        </span>
+                      )}
+                    </div>
                     <h2 style={{ fontSize: 19, fontWeight: 700, marginTop: 4 }}>
                       {pendingInvite.preview.groupName}
                     </h2>
@@ -285,34 +292,29 @@ export function GroupsHomeView({
               <span>Caricamento dei gruppi…</span>
             </div>
           ) : loadError && groups.length === 0 ? null : groups.length === 0 ? (
-            <div className="card empty-state">
-              <span className="empty-icon">
-                <Users size={22} />
-              </span>
-              <h2 className="empty-title">Nessun gruppo ancora</h2>
-              <p className="empty-desc">
-                Crea il vostro primo gruppo (ad esempio &ldquo;Casa&rdquo; o &ldquo;Vacanze&rdquo;) e
-                condividi il link d&apos;invito con chi vuoi.
-              </p>
-              <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setShowCreate(true)}
-                >
-                  <Plus size={16} />
-                  Crea il primo gruppo
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowJoinModal(true)}
-                >
-                  <Link2 size={15} />
-                  Incolla link d&apos;invito
-                </button>
+            <section className="card first-group" aria-labelledby="first-group-title">
+              <img
+                className="companion-art first-group-art"
+                src="./compagno.webp"
+                alt=""
+                width="152"
+                height="114"
+              />
+              <div className="first-group-copy">
+                <h2 className="empty-title" id="first-group-title">Nessun gruppo ancora</h2>
+                <p className="empty-desc">
+                  Una casa, una cena o un viaggio: crea un gruppo per annotare le spese con chi le divide con te.
+                </p>
+                <div className="inline-actions">
+                  <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+                    <Plus size={16} /> Crea il primo gruppo
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowJoinModal(true)}>
+                    <Link2 size={15} /> Incolla link d&apos;invito
+                  </button>
+                </div>
               </div>
-            </div>
+            </section>
           ) : (
             <div className="section-stack">
               {activeGroups.length > 0 && (
