@@ -904,6 +904,17 @@ export function GroupView({
       />
 
       <GroupSettingsModal
+        creatorControls={
+          group.creatorOwnerId === actorId
+            ? {
+                repo,
+                onChanged: onRefreshGroup,
+                onDeleted: () => onGroupLeft(true),
+                hasCarry:
+                  !!group.closedIntoGroupName || settlements.some((s) => s.kind !== 'settlement'),
+              }
+            : undefined
+        }
         quickMatches={data.quickMatches}
         open={settingsOpen}
         onClose={() => {

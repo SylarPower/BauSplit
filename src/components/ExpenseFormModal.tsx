@@ -37,6 +37,7 @@ import { CategoryIconPicker } from './CategoryIconPicker';
 import { Avatar } from './Icon';
 import { Modal } from './Modal';
 import { RateInput } from './RateInput';
+import { reviewSelection, ReviewParticipants } from './ReviewParticipants';
 
 interface ExpenseFormModalProps {
   allowRecurring?: boolean;
@@ -364,8 +365,10 @@ export function ExpenseFormModal({
     }
   };
 
+  const review = reviewSelection(selectableMembers, paidBy, selectedIds);
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (review.changed) return;
     setFormError(null);
 
     const cleanDesc = description.trim();
@@ -487,7 +490,7 @@ export function ExpenseFormModal({
             type="submit"
             form="expense-form"
             className="btn btn-primary"
-            disabled={saving || fetchingRate}
+            disabled={saving || fetchingRate || review.changed}
           >
             {saving
               ? 'Salvataggio…'
@@ -502,6 +505,14 @@ export function ExpenseFormModal({
     >
       <form id="expense-form" className="form-stack" onSubmit={handleSubmit}>
         {formError && <div className="alert alert-error">{formError}</div>}
+        {review.changed && (
+          <ReviewParticipants
+            onReview={() => {
+              setSelectedIds(review.ids);
+              setPaidBy(review.payer);
+            }}
+          />
+        )}
 
         <label className="field">
           <span className="field-label">Descrizione</span>
@@ -700,7 +711,13 @@ export function ExpenseFormModal({
 
         <label className="field">
           <span className="field-label">Pagato da</span>
-          <select className="select" value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
+          <select
+            required
+            className="select"
+            value={paidBy}
+            onChange={(e) => setPaidBy(e.target.value)}
+          >
+            {!paidBy && <option value="">Scegli il pagante</option>}
             {selectableMembers.map((m) => (
               <option key={m.userId} value={m.userId}>
                 {m.displayName}

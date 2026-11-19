@@ -249,7 +249,7 @@ export function SettlementFormModal({
                 {selectableMembers.map((m) => (
                   <option key={m.userId} value={m.userId}>
                     {m.displayName}
-                    {m.userId === currentUserId ? ' (tu)' : m.leftAt !== null ? ' (uscito)' : ''}
+                    {m.userId === currentUserId ? ' (tu)' : m.leftAt !== null ? ' (ex partecipante)' : ''}
                   </option>
                 ))}
               </select>
@@ -280,7 +280,7 @@ export function SettlementFormModal({
                 {selectableMembers.map((m) => (
                   <option key={m.userId} value={m.userId}>
                     {m.displayName}
-                    {m.userId === currentUserId ? ' (tu)' : m.leftAt !== null ? ' (uscito)' : ''}
+                    {m.userId === currentUserId ? ' (tu)' : m.leftAt !== null ? ' (ex partecipante)' : ''}
                   </option>
                 ))}
               </select>

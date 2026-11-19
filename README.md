@@ -18,8 +18,17 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 - Da **Impostazioni del gruppo → Categorie del gruppo**, apri l’elenco e premi la matita per cambiare nome, icona o colore di qualsiasi categoria, anche predefinita. Per cambiare icona, tocca direttamente il simbolo nella griglia: una spunta indica quello scelto. Premi **Salva categoria** per confermare. Usa le frecce nell’elenco per riordinare le categorie. Il nuovo nome compare anche sulle **vecchie spese**, nelle ricerche, nei filtri, nelle ricorrenze, negli **Insights** e nel **CSV** di quel gruppo. Nello storico rimangono sia il nome di allora sia la successiva rinomina.
 - Per il colore hai le stesse scelte nelle impostazioni e da **Nuova spesa → Categoria → Nuova**: 10 colori pronti (verde acqua, blu, viola, rosa, rosso, arancione, giallo, verde, marrone e grigio) oppure **Colore personalizzato** per scegliere qualsiasi tonalità. I colori già salvati restano come sono, anche se non sono tra i dieci.
 - Se una categoria non ti serve più, scegli **Nascondi dalle nuove spese**: potrai renderla visibile di nuovo, senza perdere movimenti né interrompere le ricorrenze. Puoi eliminare una categoria personalizzata se nessuna spesa o ricorrenza la usa. Almeno una categoria deve restare visibile. I rimborsi restano esclusi dai totali di spesa degli Insights.
-- Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. L’ultimo partecipante viene avvisato prima di eliminare il gruppo.
+- Registrare rimborsi e uscire anche con un saldo aperto. Se restano altri partecipanti, il saldo rimane visibile e saldabile. Uscire non elimina mai il conto. Se sei l’ultimo partecipante attivo, puoi conservarlo in archivio.
 - Chiudere e riaprire un gruppo. Puoi lasciarvi i saldi oppure spostarli in un altro gruppo attivo dove sono presenti **tutte le persone coinvolte**, anche con una valuta diversa. Conta la persona che ha scelto il posto in entrambi i gruppi, non la semplice coincidenza fra due nomi. I gruppi chiusi rimangono consultabili ed esportabili.
+
+### Se hai creato tu il gruppo o il Conto al volo
+
+In un conto aperto, scegli **⚙️ Impostazioni del gruppo → Gestisci partecipanti**. Questi comandi restano tuoi anche se colleghi l’accesso ospite al tuo account.
+
+- **Correggi un nome** con la matita. Il soprannome cambia solo in questo conto: non modifica il profilo né i nomi negli altri gruppi. Lo storico conserva anche i nomi di allora.
+- **Rimuovi una persona** con l’icona accanto al nome. Prima della conferma vedi il saldo e cosa succederà. Un nome mai rivendicato e senza movimenti o ricorrenze può essere eliminato. Un posto contabile viene invece escluso dalle nuove spese: se Sara doveva 20 € per una cena in quattro, le quattro quote restano identiche. In **Saldi → Segna rimborso** puoi ancora registrare i suoi 20 €. Le ricorrenze che la includono vanno in pausa: controlla pagante e quote prima di riattivarle. Se lo storico di una versione precedente non permette di escludere che il nome sia stato usato, BauSplit conserva il posto.
+- Se la persona era entrata, perde l’accesso **solo a questo gruppo** e il link precedente scade per tutti. Solo tu puoi autorizzare il rientro da **Partecipanti non attivi → Consenti nuovo invito**. Poi condividi il link attuale da **Invita**: la persona deve ancora accettarlo, ritrovando il proprio posto e i saldi. Un posto conservato solo per nome può invece essere reincluso nelle spese senza concedere accesso.
+- **Elimina conto personale** è disponibile anche con più nomi, spese e rimborsi, se nessun altro è mai entrato e non ci sono riporti di saldo. L’app elenca cosa andrà perso e chiede una seconda conferma. Se un’altra persona ha avuto accesso (anche se poi è uscita o l’hai rimossa), oppure il conto ha inviato o ricevuto un riporto, **Archivia invece…** conserva lo storico. Non si aggira questa protezione uscendo per ultimi.
 
 ## Una cena con amici: Conto al volo
 
@@ -32,7 +41,7 @@ Il taccuino delle spese di gruppo, in italiano. Funziona sul telefono e sul comp
 
 ### 1. Aggiorna il tuo progetto Supabase
 
-**Per attivare Conto al volo**, esegui una volta lo script di questa versione anche se avevi già aggiornato le categorie. Se accessi e inviti funzionano, non devi riconfigurarli.
+**Per attivare i comandi del creatore**, esegui lo script di questa versione anche se avevi già attivato Conto al volo. La pubblicazione su GitHub Pages aggiorna il sito, non il database. Se accessi e inviti funzionano, non devi riconfigurarli.
 
 1. Apri il progetto che contiene già le tue spese (`mwicplgacecjaeyzbuhx`, se usi quello impostato nell’app). **Non creare un nuovo progetto e non cancellare tabelle.** Se contiene dati importanti, fai prima una copia di sicurezza.
 2. In questa versione del repository apri [**supabase/schema.sql**](./supabase/schema.sql) e copia **tutto** il contenuto del file.

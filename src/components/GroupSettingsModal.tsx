@@ -1,5 +1,5 @@
 import { Archive, ArchiveRestore, ArrowRight, LogOut, Plus, RefreshCw } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { convertTransferAmount, getGroupTransferTargets } from '../lib/accounting';
 import { formatMoney, formatRateValue } from '../lib/currencies';
 import { formatFullDateIT, todayISO } from '../lib/dates';
@@ -17,6 +17,11 @@ import type {
 import { Avatar } from './Icon';
 import { CategoryManager, type CategoryManagerProps } from './CategoryManager';
 import { Modal } from './Modal';
+import {
+  ParticipantManager,
+  PersonalGroupDeletion,
+  type CreatorControlsProps,
+} from './CreatorControls';
 import { RateInput } from './RateInput';
 
 interface GroupSettingsModalProps extends CategoryManagerProps {
@@ -26,6 +31,7 @@ interface GroupSettingsModalProps extends CategoryManagerProps {
   group: ExpenseGroup;
   allGroups: GroupOverview[];
   quickMatches?: QuickEventMatch[];
+  creatorControls?: CreatorControlsProps;
   members: GroupMember[];
   balances: MemberBalance[];
   transfers: SimplifiedTransfer[];
@@ -49,6 +55,7 @@ export function GroupSettingsModal({
   group,
   allGroups,
   quickMatches,
+  creatorControls,
   members,
   balances,
   transfers,
@@ -75,6 +82,7 @@ export function GroupSettingsModal({
   const [newMember, setNewMember] = useState('');
   const [addingMember, setAddingMember] = useState(false);
   // Chiusura gruppo e trasferimento saldo rimanente
+  const closingSection = useRef<HTMLDivElement>(null);
   const [showClosePanel, setShowClosePanel] = useState(false);
   const [requestedMode, setCloseMode] = useState<'transfer' | 'keep'>('keep');
   const [targetGroupId, setTargetGroupId] = useState('');
@@ -241,7 +249,7 @@ export function GroupSettingsModal({
   const groupUnchanged = name.trim() === group.name && description.trim() === group.description;
 
   const closingPanel = (
-    <div className="field">
+    <div className="field" ref={closingSection} tabIndex={-1}>
       <div style={{ fontSize: 14, fontWeight: 650 }}>
         {isClosed
           ? 'Stato del gruppo'
@@ -653,50 +661,85 @@ export function GroupSettingsModal({
 
         {/* Membri attivi */}
         <div className="field">
-          <div style={{ fontSize: 14, fontWeight: 650 }}>
-            Membri del gruppo ({activeMembers.length})
-          </div>
-          <div className="split-list">
-            {activeMembers.map((m) => (
-              <div key={m.userId} className="split-row">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar name={m.displayName} seed={m.userId} size={30} />
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>
-                      {m.displayName}
-                      {m.userId === currentUserId && (
-                        <span className="text-muted" style={{ fontWeight: 400 }}>
-                          {' '}
-                          (tu)
-                        </span>
-                      )}
-                    </div>
-                    <div className="field-hint">
-                      {m.ownerId === null && (isEvent ? 'Partecipante senza accesso · ' : 'Nome da scegliere nell’invito · ')}Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
+          {creatorControls && !isClosed ? (
+            <ParticipantManager
+              group={group}
+              members={members}
+              currentSeat={currentUserId}
+              controls={creatorControls}
+              onToast={onToast}
+            />
+          ) : (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 650 }}>
+                Membri del gruppo ({activeMembers.length})
+              </div>
+              <div className="split-list">
+                {activeMembers.map((m) => (
+                  <div key={m.userId} className="split-row">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Avatar name={m.displayName} seed={m.userId} size={30} />
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>
+                          {m.displayName}
+                          {m.userId === currentUserId && (
+                            <span className="text-muted" style={{ fontWeight: 400 }}>
+                              {' '}
+                              (tu)
+                            </span>
+                          )}
+                        </div>
+                        <div className="field-hint">
+                          {m.ownerId === null &&
+                            (isEvent
+                              ? 'Partecipante senza accesso · '
+                              : 'Nome da scegliere nell’invito · ')}
+                          Nel gruppo dal {formatFullDateIT(m.joinedAt.slice(0, 10))}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
           {!isClosed && !isEvent && (
-            <form className="form-stack" onSubmit={async (event) => {
-              event.preventDefault();
-              setAddingMember(true);
-              try {
-                await onAddParticipant(newMember.trim());
-                setNewMember('');
-                onToast('Partecipante aggiunto');
-              } catch (err) { onToast(translateErrorIT(err), true); }
-              finally { setAddingMember(false); }
-            }}>
+            <form
+              className="form-stack"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                setAddingMember(true);
+                try {
+                  await onAddParticipant(newMember.trim());
+                  setNewMember('');
+                  onToast('Partecipante aggiunto');
+                } catch (err) {
+                  onToast(translateErrorIT(err), true);
+                } finally {
+                  setAddingMember(false);
+                }
+              }}
+            >
               <label className="field">
                 <span className="field-label">Aggiungi un partecipante</span>
-                <input className="input" placeholder="Nome o soprannome" maxLength={60} required
-                  value={newMember} onChange={(e) => setNewMember(e.target.value)} />
-                <span className="field-hint">Puoi già dividere le spese con questa persona. Sceglierà il suo nome quando aprirà l’invito.</span>
+                <input
+                  className="input"
+                  placeholder="Nome o soprannome"
+                  maxLength={60}
+                  required
+                  value={newMember}
+                  onChange={(e) => setNewMember(e.target.value)}
+                />
+                <span className="field-hint">
+                  Puoi già dividere le spese con questa persona. Sceglierà il suo nome quando aprirà
+                  l’invito.
+                </span>
               </label>
-              <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} disabled={!newMember.trim() || addingMember}>
+              <button
+                className="btn btn-secondary btn-sm"
+                style={{ alignSelf: 'flex-start' }}
+                disabled={!newMember.trim() || addingMember}
+              >
                 <Plus size={14} /> Aggiungi nome
               </button>
             </form>
@@ -719,99 +762,98 @@ export function GroupSettingsModal({
 
         <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '2px 0' }} />
 
-        {/* Uscita dal gruppo (sempre consentita, anche con saldo diverso da zero) */}
-        <div className="field">
-          <div style={{ fontSize: 14, fontWeight: 650 }}>Uscita dal gruppo</div>
-          {confirmLeave ? (
-            <div className="alert alert-error" style={{ flexDirection: 'column', gap: 10 }}>
-              {activeMembers.length > 1 && activeMembers.every((m) => m.userId === currentUserId || !m.ownerId) && (
-                <span>Sei l’unica persona che ha aperto questo gruppo. {group.inviteEnabled && !isClosed
-                  ? 'Condividi il link prima di uscire: servirà per ritrovarlo.'
-                  : 'Senza un invito attivo nessuno potrà rientrare dopo la tua uscita.'}</span>
-              )}
-              <span>
-                {activeMembers.length === 1 ? (
-                  <>
-                    Sei l&apos;unico membro rimasto: uscendo, questo gruppo e tutte le sue spese
-                    verranno eliminati definitivamente. Confermi?
-                  </>
-                ) : hasNonZeroMyBalance ? (
-                  <>
-                    Il tuo saldo attuale in questo gruppo è{' '}
-                    <strong className="tabular">
-                      {formatMoney(myBalance, group.baseCurrency, { signed: true })}
-                    </strong>{' '}
-                    (non è a zero). Puoi uscire comunque: il saldo rimarrà visibile agli altri
-                    membri del gruppo e l&apos;uscita verrà annotata nello storico. Confermi?
-                  </>
-                ) : (
-                  <>
-                    Confermi di voler uscire dal gruppo &ldquo;{group.name}&rdquo;? Per rientrare
-                    in futuro ti basterà accettare di nuovo un link d&apos;invito.
-                  </>
+        {creatorControls && (
+          <PersonalGroupDeletion
+            group={group}
+            controls={creatorControls}
+            onArchive={() => {
+              setCloseMode('keep');
+              setShowClosePanel(true);
+              closingSection.current?.focus({ preventScroll: true });
+              closingSection.current?.scrollIntoView?.({ block: 'start' });
+            }}
+          />
+        )}
+
+        {!group.creatorOwnerId ? (
+          <p className="field-hint">
+            Per attivare i comandi del creatore e l’uscita protetta, chi gestisce BauSplit deve
+            aggiornare Supabase con lo{' '}
+            <a
+              href="https://github.com/SylarPower/BauSplit/blob/main/supabase/schema.sql"
+              target="_blank"
+              rel="noreferrer"
+            >
+              script SQL di questa versione
+            </a>
+            .
+          </p>
+        ) : (
+          <section className="field" aria-label="Uscita dal gruppo">
+            <h3 className="field-label">Uscita dal gruppo</h3>
+            {activeMembers.length <= 1 ? (
+              <p className="field-hint">
+                Sei l’ultimo partecipante attivo. Per conservare le spese e lo storico,{' '}
+                {isClosed ? 'lascia il gruppo in archivio.' : 'usa la chiusura del gruppo.'}
+              </p>
+            ) : confirmLeave ? (
+              <div className="creator-confirm">
+                <strong>Uscire da «{group.name}»?</strong>
+                {activeMembers.every((m) => m.userId === currentUserId || !m.ownerId) && (
+                  <p>
+                    Non resterà nessuno con accesso.{' '}
+                    {group.inviteEnabled && !isClosed
+                      ? 'Conserva il link attuale prima di uscire per poter rientrare.'
+                      : 'Senza un invito attivo non potrai rientrare. Puoi invece conservare il conto in archivio.'}
+                  </p>
                 )}
-              </span>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <p>
+                  {hasNonZeroMyBalance && (
+                    <>
+                      Il tuo saldo è{' '}
+                      <strong className="tabular">
+                        {formatMoney(myBalance, group.baseCurrency, { signed: true })}
+                      </strong>
+                      .{' '}
+                    </>
+                  )}
+                  L’uscita non elimina il conto: saldi e storico restano invariati.
+                </p>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="btn btn-danger-solid btn-sm"
+                    onClick={handleLeave}
+                    disabled={leaving}
+                  >
+                    {leaving ? 'Uscita…' : 'Sì, esci dal gruppo'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmLeave(false)}
+                    disabled={leaving}
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="inline-actions">
+                <span className="field-hint">
+                  Puoi lasciare il gruppo anche con un saldo aperto.
+                </span>
                 <button
                   type="button"
-                  className="btn btn-danger-solid btn-sm"
-                  onClick={handleLeave}
-                  disabled={leaving}
+                  className="btn btn-danger btn-sm"
+                  onClick={() => setConfirmLeave(true)}
                 >
-                  {leaving
-                    ? 'Operazione in corso…'
-                    : activeMembers.length === 1
-                      ? 'Elimina gruppo ed esci'
-                      : hasNonZeroMyBalance
-                        ? 'Sì, esci anche con saldo aperto'
-                        : 'Sì, esci dal gruppo'}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setConfirmLeave(false)}
-                  disabled={leaving}
-                >
-                  Annulla
+                  <LogOut size={14} /> Esci dal gruppo
                 </button>
               </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <span className="field-hint">
-                {activeMembers.length === 1 ? (
-                  'Sei l’unico membro rimasto: uscendo il gruppo verrà eliminato.'
-                ) : hasNonZeroMyBalance ? (
-                  <>
-                    Puoi uscire in qualsiasi momento, anche se il tuo saldo attuale è{' '}
-                    <strong className="tabular">
-                      {formatMoney(myBalance, group.baseCurrency, { signed: true })}
-                    </strong>
-                    .
-                  </>
-                ) : (
-                  'Puoi uscire dal gruppo in qualsiasi momento.'
-                )}
-              </span>
-              <button
-                type="button"
-                className="btn btn-danger btn-sm"
-                onClick={() => setConfirmLeave(true)}
-              >
-                <LogOut size={14} />
-                {activeMembers.length === 1 ? 'Elimina gruppo' : 'Esci dal gruppo'}
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </section>
+        )}
       </div>
     </Modal>
   );
