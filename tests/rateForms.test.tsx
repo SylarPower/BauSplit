@@ -238,6 +238,7 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
       inviteToken: '',
       closedBy: null,
       closedIntoGroupId: null,
+      quickCreatorSeat: null,
       closedIntoGroupName: null,
       createdAt: '',
       createdBy: 'Anna',

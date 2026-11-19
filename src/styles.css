@@ -1696,7 +1696,8 @@ textarea:focus-visible {
 
   .mobile-tabbar {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
     position: fixed;
     bottom: 0;
     left: 0;
@@ -1880,3 +1881,18 @@ textarea.input { height: auto; resize: vertical; }
 .category-editor { gap: 12px; }
 .category-visibility { align-items: flex-start; font-size: 13.5px; }
 .category-editor-buttons { flex-wrap: wrap; }
+
+/* Partecipanti di una serata: il gruppo di provenienza distingue anche gli omonimi. */
+.quick-contacts { min-width: 0; border: 0; padding: 0; margin: 0; }
+.quick-contacts legend { padding: 0; margin-bottom: 6px; }
+.quick-contact-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(155px,100%),1fr)); gap: 6px; max-height: 220px; overflow-y: auto; padding: 3px; }
+.quick-contact { min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 7px 9px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); overflow-wrap: anywhere; }
+.quick-contact input { accent-color: var(--accent); }
+.quick-contact strong, .quick-contact small { display: block; }
+.quick-contact strong { font-size: 13px; }
+.quick-contact small { font-size: 12px; color: var(--text-secondary); }
+.quick-event-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+
+.close-mode .segmented-btn { min-height: 44px; height: auto; padding: 5px 8px; line-height: 1.25; }
+.quick-aliases summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.quick-aliases .field { margin-top: 8px; }

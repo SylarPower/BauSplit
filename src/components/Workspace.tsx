@@ -264,6 +264,14 @@ export function Workspace({
             bookmarks={bookmarks}
             loadError={loadError}
             defaultName={displayProfile.displayName}
+            ownerId={uid}
+            onCreateQuickEvent={async (input) => {
+              const event = await repo.createQuickEvent(input);
+              remember(event);
+              setGroupId(event.id);
+              void loadHome();
+              showToast('Serata creata');
+            }}
             onAccount={onOpenAccount}
             onRetryLoad={loadHome}
             onSelectGroup={setGroupId}

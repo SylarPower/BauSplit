@@ -43,6 +43,9 @@ import type {
   SimplifiedTransfer,
 } from '../types';
 import { BalancesTab } from './BalancesTab';
+import { quickSummary, simplifyEventDebts } from '../lib/quickEvent';
+import { CopyEventSummary } from './CopyEventSummary';
+import { QuickEventForm } from './QuickEventForm';
 import { ExpenseFormModal } from './ExpenseFormModal';
 import { DEFAULT_EXPENSE_FILTERS, ExpensesTab } from './ExpensesTab';
 import { GroupSettingsModal } from './GroupSettingsModal';
@@ -85,6 +88,8 @@ export function GroupView({
   const { group, members, categories, expenses, settlements, recurringExpenses, activityLogs } =
     data;
   const isClosed = group.closedAt !== null;
+  const isEvent = !!group.quickCreatorSeat;
+  const [addingPeople, setAddingPeople] = useState(false);
 
   const [tab, setTab] = useState<GroupTab>('expenses');
   const [filters, setFilters] = useState<ExpenseFilters>({ ...DEFAULT_EXPENSE_FILTERS });
@@ -170,8 +175,8 @@ export function GroupView({
   );
 
   const transfers = useMemo(
-    () => simplifyDebts(balances, group.baseCurrency),
-    [balances, group.baseCurrency]
+    () => (isEvent ? simplifyEventDebts : simplifyDebts)(balances, group.baseCurrency),
+    [balances, group.baseCurrency, isEvent]
   );
 
   const myBalance = balances.find((b) => b.userId === currentUserId)?.netBalance ?? 0;
@@ -363,17 +368,14 @@ export function GroupView({
       nameOf,
     });
     await onRefreshGroup();
-    onToast(
-      params.targetGroup
-        ? `Gruppo chiuso: saldo spostato in "${params.targetGroup.name}"`
-        : 'Gruppo chiuso'
-    );
+    const message = isEvent ? 'Serata archiviata' : 'Gruppo chiuso';
+    onToast(params.targetGroup ? `${message}: saldo spostato in "${params.targetGroup.name}"` : message);
   };
 
   const handleReopenGroup = async () => {
     await repo.reopenGroup(group.id, actorId);
     await onRefreshGroup();
-    onToast('Gruppo riaperto');
+    onToast(isEvent ? 'Serata riaperta' : 'Gruppo riaperto');
   };
 
   const handleLeaveGroup = async () => {
@@ -484,6 +486,7 @@ export function GroupView({
     { id: 'history', label: 'Storico', icon: History },
   ];
 
+  const visibleTabs = tabItems.filter((item) => !isEvent || item.id !== 'recurring');
   return (
     <>
       <div className="container with-mobile-nav">
@@ -525,7 +528,8 @@ export function GroupView({
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                 <h1 className="page-title">{group.name}</h1>
                 <span className="badge">{group.baseCurrency}</span>
-                {isClosed && <span className="badge badge-warning">Gruppo chiuso</span>}
+                {isEvent && <span className="badge badge-accent">Serata</span>}
+                {isClosed && <span className="badge badge-warning">{isEvent ? 'Archiviata' : 'Gruppo chiuso'}</span>}
               </div>
               {group.description && (
                 <p className="page-subtitle" style={{ marginTop: 3 }}>
@@ -548,7 +552,7 @@ export function GroupView({
                   ))}
                 </span>
                 <span>{activeMembers.map((m) => m.displayName).join(', ')}</span>
-                {!isClosed && activeMembers.length === 1 && (
+                {!isClosed && !isEvent && activeMembers.length === 1 && (
                   <button
                     type="button"
                     className="link-btn"
@@ -573,6 +577,43 @@ export function GroupView({
             )}
           </div>
         </header>
+
+        {isEvent && (
+          <div className="quick-event-actions" role="group" aria-label="Azioni della serata">
+            {!isClosed && group.quickCreatorSeat === currentUserId && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAddingPeople(true)}>
+                <UserPlus size={15} /> Aggiungi persone
+              </button>
+            )}
+            <CopyEventSummary
+              text={quickSummary(data, transfers)}
+              onCopied={() => onToast('Riepilogo copiato, pronto per la chat')}
+            />
+            {!isClosed && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+                setSettingsFocusClose(true);
+                setSettingsOpen(true);
+              }}>
+                <Archive size={15} /> Concludi serata
+              </button>
+            )}
+          </div>
+        )}
+        {addingPeople && !isClosed && (
+          <QuickEventForm
+            mode="add"
+            groups={allGroups}
+            ownerId={actorId}
+            members={members}
+            matches={data.quickMatches ?? []}
+            onClose={() => setAddingPeople(false)}
+            onAdd={async (people) => {
+              await repo.addQuickPeople(group.id, people);
+              await onRefreshGroup();
+              onToast('Partecipanti aggiunti');
+            }}
+          />
+        )}
 
         {/* Banner gruppo chiuso */}
         {isClosed && (
@@ -669,7 +710,7 @@ export function GroupView({
 
         {/* Navigazione schede Desktop */}
         <nav className="tabs-bar" aria-label="Sezioni del gruppo">
-          {tabItems.map((item) => {
+          {visibleTabs.map((item) => {
             const Icon = item.icon;
             return (
               <button
@@ -722,6 +763,7 @@ export function GroupView({
 
         {tab === 'balances' && (
           <BalancesTab
+            isEvent={isEvent}
             isClosed={isClosed}
             baseCurrency={group.baseCurrency}
             displayCurrency={displayCurrency}
@@ -793,7 +835,7 @@ export function GroupView({
 
       {/* Navigazione schede Mobile */}
       <nav className="mobile-tabbar" aria-label="Sezioni del gruppo">
-        {tabItems.map((item) => {
+        {visibleTabs.map((item) => {
           const Icon = item.icon;
           return (
             <button
@@ -811,6 +853,7 @@ export function GroupView({
 
       {/* Modali */}
       <ExpenseFormModal
+        allowRecurring={!isEvent}
         open={expenseModalOpen}
         onClose={() => {
           setExpenseModalOpen(false);
@@ -861,6 +904,7 @@ export function GroupView({
       />
 
       <GroupSettingsModal
+        quickMatches={data.quickMatches}
         open={settingsOpen}
         onClose={() => {
           setSettingsOpen(false);

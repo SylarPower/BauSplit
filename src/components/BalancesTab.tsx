@@ -16,6 +16,7 @@ import { Avatar } from './Icon';
 
 interface BalancesTabProps {
   isClosed: boolean;
+  isEvent?: boolean;
   baseCurrency: string;
   displayCurrency: string;
   onDisplayCurrencyChange: (currency: string) => void;
@@ -34,6 +35,7 @@ interface BalancesTabProps {
 
 export function BalancesTab({
   isClosed,
+  isEvent = false,
   baseCurrency,
   displayCurrency,
   onDisplayCurrencyChange,
@@ -134,7 +136,7 @@ export function BalancesTab({
           <div>
             <h2 className="section-title">Come pareggiare i conti</h2>
             <p className="field-hint">
-              Saldi semplificati per ridurre al minimo il numero di pagamenti.
+              Saldi compensati tra tutti i partecipanti per ridurre il numero di pagamenti.
             </p>
           </div>
           {!isClosed && balances.length >= 2 && (
@@ -217,7 +219,7 @@ export function BalancesTab({
               );
             })}
 
-            {!isClosed && (
+            {!isClosed && !isEvent && (
               <div
                 style={{
                   padding: '11px 18px',

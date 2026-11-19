@@ -434,3 +434,245 @@ describe('Catalogo categorie del gruppo', () => {
     await expect(saveCategory(a.id, 'altro', 'Mio')).rejects.toThrow(/chiuso/);
   });
 });
+
+type Person = { name: string; group_id?: string; user_id?: string };
+const quickEvent = (people: Person[] = [], currency = 'EUR') =>
+  first<{ id: string; invite_token: string; quick_creator_seat: string }>(
+    "select * from create_quick_event('Cena di sabato',$1,$2)",
+    [currency, JSON.stringify(people)]
+  );
+const addPeople = (g: string, people: Person[]) =>
+  db.query('select add_quick_event_people($1,$2)', [g, JSON.stringify(people)]);
+const seatByName = (g: string, n: string) =>
+  first<{ user_id: string; owner_id: string | null }>(
+    'select user_id,owner_id from group_members where group_id=$1 and display_name=$2',
+    [g, n]
+  );
+const carryPair = (
+  ev: string,
+  dest: string,
+  from: string,
+  to: string,
+  amount: number,
+  target = amount,
+  fx = 1
+) =>
+  db.query('select close_expense_group($1,$2,$3,$4)', [
+    ev,
+    dest,
+    JSON.stringify([
+      { from_user: from, to_user: to, source_amount: amount, target_amount: target },
+    ]),
+    fx,
+  ]);
+const eventExpense = (g: string, label: string, total: number, payer: string, seats: string[]) =>
+  db.query(
+    `select save_expense($1,null,$2,$3,'EUR',1,current_date,false,$3,current_date,'altro','Altro',$4,'equal','',$5,'created',$2)`,
+    [
+      g,
+      label,
+      total,
+      payer,
+      JSON.stringify(
+        seats.map((user_id) => ({
+          user_id,
+          amount: total / seats.length,
+          base_amount: total / seats.length,
+        }))
+      ),
+    ]
+  );
+
+describe('Conti al volo', () => {
+  it('dal solo telefono del creatore: cena + taxi, rimborso di Sara, riporto del solo residuo senza copiare spese', async () => {
+    await as(guest);
+    const casa = await createGroup('Casa', ['Giulia']);
+    const partner = await seatByName(casa.id, 'Giulia'); // nessun account nemmeno nel gruppo di coppia
+    const meAtHome = await member(casa.id, guest);
+    const ev = await quickEvent();
+    expect(
+      (await db.query('select * from group_members where group_id=$1', [ev.id])).rows
+    ).toHaveLength(1);
+    const me = ev.quick_creator_seat;
+    expect((await member(ev.id, guest)).user_id).toBe(me);
+    await addPeople(ev.id, [
+      { name: 'Giulia P.', group_id: casa.id, user_id: partner.user_id },
+      { name: 'Luca' },
+      { name: 'Sara' },
+    ]);
+    const b = (await seatByName(ev.id, 'Giulia P.')).user_id,
+      c = (await seatByName(ev.id, 'Luca')).user_id,
+      d = (await seatByName(ev.id, 'Sara')).user_id;
+    await eventExpense(ev.id, 'Cena', 80, me, [me, b, c, d]);
+    await eventExpense(ev.id, 'Taxi', 30, c, [me, c, d]);
+    const carry = () => carryPair(ev.id, casa.id, b, me, 20);
+    await expect(carry()).rejects.toThrow(/saldi sono cambiati/); // anche Sara deve ancora 30
+    expect(
+      (await db.query('select * from settlements where group_id in ($1,$2)', [ev.id, casa.id])).rows
+    ).toHaveLength(0);
+    await db.query(
+      `insert into settlements(group_id,from_user,to_user,amount,currency,exchange_rate,rate_date,base_amount,settlement_date,created_by,updated_by)
+      values($1,$2,$3,30,'EUR',1,current_date,30,current_date,$4,$4)`,
+      [ev.id, d, me, guest]
+    );
+    await expect(carryPair(ev.id, casa.id, b, me, 20, 900)).rejects.toThrow(/convertito/);
+    await carry();
+    expect(
+      await first(
+        "select from_user,to_user,base_amount from settlements where group_id=$1 and kind='transfer_in'",
+        [casa.id]
+      )
+    ).toEqual({ from_user: meAtHome.user_id, to_user: partner.user_id, base_amount: '20.00' });
+    expect(
+      await first(
+        "select from_user,to_user,base_amount from settlements where group_id=$1 and kind='transfer_out'",
+        [ev.id]
+      )
+    ).toEqual({ from_user: b, to_user: me, base_amount: '20.00' });
+    expect(
+      (await db.query('select * from expenses where group_id=$1', [casa.id])).rows
+    ).toHaveLength(0);
+    expect((await db.query('select * from expenses where group_id=$1', [ev.id])).rows).toHaveLength(
+      2
+    );
+    await expect(carry()).rejects.toThrow(/chiuso/);
+    await db.query('select reopen_expense_group($1)', [ev.id]);
+    await expect(carry()).rejects.toThrow(/saldi sono cambiati/);
+    expect(
+      (await db.query('select * from settlements where group_id=$1', [casa.id])).rows
+    ).toHaveLength(1);
+  });
+
+  it('il suggerimento riserva un posto, non concede accesso. Solo la persona verificata può sceglierlo con l’invito', async () => {
+    await as(guest);
+    const casa = await createGroup('Casa', ['Giulia']);
+    const original = (await seatByName(casa.id, 'Giulia')).user_id;
+    await as(friend);
+    await join(casa.invite_token, original);
+    await as(guest);
+    const ev = await quickEvent([
+      { name: 'G.', group_id: casa.id, user_id: original },
+      { name: 'Luca' },
+    ]);
+    const p = await seatByName(ev.id, 'G.');
+    expect(p.owner_id).toBeNull();
+    await expect(
+      addPeople(ev.id, [{ name: 'Secondo posto', group_id: casa.id, user_id: original }])
+    ).rejects.toThrow(/già nella serata/);
+    await as(outsider);
+    expect(await countGroups(ev.id)).toBe(0);
+    expect((await preview(ev.invite_token)).available_names.map((n) => n.name)).toEqual(['Luca']);
+    await expect(join(ev.invite_token, p.user_id)).rejects.toThrow(/disponibile/);
+    await as(friend);
+    expect(await countGroups(ev.id)).toBe(0);
+    expect((await preview(ev.invite_token)).available_names.map((n) => n.id)).toContain(p.user_id);
+    await join(ev.invite_token, p.user_id);
+    expect((await member(ev.id, friend)).user_id).toBe(p.user_id);
+    expect(
+      (await db.query('select * from get_quick_event_matches($1)', [ev.id])).rows
+    ).toHaveLength(0);
+    await expect(carryPair(ev.id, casa.id, p.user_id, ev.quick_creator_seat, 1)).rejects.toThrow(
+      /coppia/
+    );
+  });
+
+  it('rifiuta riferimenti fuori dai propri gruppi, omonimi e destinazioni non più a due; la creazione è atomica', async () => {
+    await as(outsider);
+    const priv = await createGroup('Privato', ['Giulia']);
+    const foreign = (await seatByName(priv.id, 'Giulia')).user_id;
+    await as(guest);
+    const casa = await createGroup('Casa', ['Giulia']);
+    const own = (await seatByName(casa.id, 'Giulia')).user_id;
+    await expect(
+      quickEvent([{ name: 'Luca' }, { name: 'Giulia', group_id: priv.id, user_id: foreign }])
+    ).rejects.toThrow(/non più disponibile/);
+    expect(
+      (await db.query('select id from expense_groups where quick_creator_seat is not null')).rows
+    ).toHaveLength(0);
+    const ev = await quickEvent([{ name: 'Giulia' }]);
+    const manual = (await seatByName(ev.id, 'Giulia')).user_id;
+    expect(
+      (await db.query('select * from get_quick_event_matches($1)', [ev.id])).rows
+    ).toHaveLength(0);
+    await expect(carryPair(ev.id, casa.id, manual, ev.quick_creator_seat, 1)).rejects.toThrow(
+      /coppia/
+    );
+    await addPeople(ev.id, [{ name: 'Giulia R.', group_id: casa.id, user_id: own }]);
+    const peer = (await seatByName(ev.id, 'Giulia R.')).user_id;
+    expect(
+      (await db.query('select group_id,peer_id from get_quick_event_matches($1)', [ev.id])).rows
+    ).toEqual([{ group_id: casa.id, peer_id: peer }]);
+    await db.query("select add_group_participant($1,'Terzo')", [casa.id]);
+    await expect(carryPair(ev.id, casa.id, peer, ev.quick_creator_seat, 1)).rejects.toThrow(
+      /coppia/
+    );
+    await as(outsider);
+    await expect(addPeople(ev.id, [{ name: 'Mira' }])).rejects.toThrow(/Solo chi ha creato/);
+  });
+});
+
+describe('Storico e identità della serata', () => {
+  it('il riporto funziona anche a parti invertite e con cambio: il selezionato non deve accettare, nemmeno dopo il passaggio ospite → account', async () => {
+    await as(guest);
+    const couple = await first<{ id: string }>(
+      "select * from create_expense_group('Casa','','JPY','{Giulia}')"
+    );
+    const b = (await seatByName(couple.id, 'Giulia')).user_id;
+    const event = await quickEvent([{ name: 'Giulia', group_id: couple.id, user_id: b }]);
+    const peer = (await seatByName(event.id, 'Giulia')).user_id;
+    await eventExpense(event.id, 'Biglietti', 2, peer, [event.quick_creator_seat, peer]);
+    await db.query('select authorize_guest_link($1)', [account]);
+    await as(account);
+    await db.query('select link_guest_groups($1)', [guest]);
+    expect((await member(event.id, account)).user_id).toBe(event.quick_creator_seat);
+    await carryPair(event.id, couple.id, event.quick_creator_seat, peer, 1, 161, 160.5);
+    expect(
+      await first(
+        "select from_user,to_user,base_amount,amount,exchange_rate from settlements where group_id=$1 and kind='transfer_in'",
+        [couple.id]
+      )
+    ).toEqual({
+      from_user: b,
+      to_user: (await member(couple.id, account)).user_id,
+      base_amount: '161.00',
+      amount: '1.00',
+      exchange_rate: '160.50000000',
+    });
+    await as(guest);
+    expect(await countGroups(event.id)).toBe(0);
+  });
+
+  it('archivia senza simulare rimborsi; il secondo Run non ripristina accessi e conserva i collegamenti', async () => {
+    await as(guest);
+    const home = await createGroup('Casa', ['B']);
+    const original = (await seatByName(home.id, 'B')).user_id;
+    const e = await quickEvent([{ name: 'B', group_id: home.id, user_id: original }]);
+    const peer = (await seatByName(e.id, 'B')).user_id;
+    await eventExpense(e.id, 'Cinema', 10, e.quick_creator_seat, [e.quick_creator_seat, peer]);
+    await db.query('select close_expense_group($1)', [e.id]);
+    await db.exec('reset role');
+    await db.exec(schema);
+    await as(guest);
+    expect(
+      await first('select quick_creator_seat from expense_groups where id=$1', [home.id])
+    ).toEqual({ quick_creator_seat: null });
+    expect(
+      (await db.query('select id from settlements where group_id in ($1,$2)', [e.id, home.id])).rows
+    ).toHaveLength(0);
+    expect(
+      (await db.query("select id from activity_logs where group_id=$1 and action='closed'", [e.id]))
+        .rows
+    ).toHaveLength(1);
+    await expect(addPeople(e.id, [{ name: 'E.' }])).rejects.toThrow(/aperto/);
+    await db.query('select reopen_expense_group($1)', [e.id]);
+    expect(
+      await first('select group_id,target_peer,can_carry from get_quick_event_matches($1)', [e.id])
+    ).toEqual({ group_id: home.id, target_peer: original, can_carry: true });
+    expect((await seatByName(e.id, 'B')).owner_id).toBeNull();
+    await expect(db.query('select * from bausplit_private.event_people')).rejects.toThrow(
+      /permission denied/i
+    );
+    await db.exec('reset role; set role anon');
+    await expect(quickEvent()).rejects.toThrow(/permission denied/i);
+  });
+});

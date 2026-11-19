@@ -39,6 +39,7 @@ import { Modal } from './Modal';
 import { RateInput } from './RateInput';
 
 interface ExpenseFormModalProps {
+  allowRecurring?: boolean;
   open: boolean;
   onClose: () => void;
   groupId: string;
@@ -57,6 +58,7 @@ interface ExpenseFormModalProps {
 }
 
 export function ExpenseFormModal({
+  allowRecurring = true,
   open,
   onClose,
   groupId,
@@ -415,7 +417,7 @@ export function ExpenseFormModal({
 
     setSaving(true);
     try {
-      if (!editingExpense && isRecurring) {
+      if (allowRecurring && !editingExpense && isRecurring) {
         const today = todayISO();
         const registerImmediately = expenseDate <= today;
         const nextDue = registerImmediately
@@ -907,7 +909,7 @@ export function ExpenseFormModal({
         </div>
 
         {/* Opzione spesa ricorrente (solo in creazione) */}
-        {!editingExpense && (
+        {allowRecurring && !editingExpense && (
           <div
             className="fx-box"
             style={{ background: isRecurring ? 'var(--accent-soft)' : undefined }}

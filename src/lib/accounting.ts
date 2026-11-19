@@ -47,6 +47,17 @@ export function convertToBaseAmount(
   return roundCurrency(amount * exchangeRate, baseCurrency);
 }
 
+/** Per un riporto l'anteprima e PostgreSQL devono concordare anche su mezzo
+ * centesimo: il tasso contabile ha 8 decimali, la valuta di arrivo 0 o 2. */
+export function convertTransferAmount(amount: number, from: string, rate: number, to: string): number {
+  if (from === to) return roundCurrency(amount, to);
+  if (!Number.isFinite(rate) || rate <= 0 || rate >= 1e10) return 0;
+  const rateUnits = BigInt(rate.toFixed(8).replace('.', ''));
+  const numerator = BigInt(toMinorUnits(amount, from)) * rateUnits * BigInt(unitFactor(to));
+  const denominator = BigInt(unitFactor(from)) * 100000000n;
+  return fromMinorUnits(Number((numerator + denominator / 2n) / denominator), to);
+}
+
 /**
  * Distribuisce `totalUnits` interi in modo proporzionale a `weights`
  * tramite il metodo dei resti più alti (Hamilton), garantendo che la somma
@@ -498,7 +509,7 @@ export function getGroupTransferTargets(params: {
 
   for (const ov of allGroups) {
     if (ov.group.id === sourceGroupId) continue;
-    if (ov.group.closedAt !== null) continue;
+    if (ov.group.closedAt !== null || ov.group.quickCreatorSeat) continue;
 
     const targetOwners = new Set(ov.members.map((m) => m.ownerId).filter(Boolean));
     const missing = involvedUserIds.filter((uid) => !targetOwners.has(owners.get(uid) ?? null));
