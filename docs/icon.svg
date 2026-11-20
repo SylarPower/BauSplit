@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#304f3d"/>
-  <g fill="#faf9f2">
-    <ellipse cx="16" cy="29" rx="4.6" ry="6.7" transform="rotate(-24 16 29)"/>
-    <ellipse cx="26" cy="20.5" rx="4.7" ry="7" transform="rotate(-9 26 20.5)"/>
-    <ellipse cx="38.5" cy="20.5" rx="4.7" ry="7" transform="rotate(10 38.5 20.5)"/>
-    <ellipse cx="48" cy="29" rx="4.6" ry="6.7" transform="rotate(24 48 29)"/>
-    <path d="M21 39c3-3 5.5-10 11-10s8 7 11 10c6 6 4 13-3 13-3.5 0-5.5-2-8-2s-4.5 2-8 2c-7 0-9-7-3-13Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1568 1568">
+  <rect width="1568" height="1568" fill="#faf9f2"/>
+  <g fill="#304f3d">
+    <ellipse cx="392" cy="710" rx="112" ry="165" transform="rotate(-24 392 710)"/>
+    <ellipse cx="637" cy="502" rx="115" ry="171" transform="rotate(-9 637 502)"/>
+    <ellipse cx="943" cy="502" rx="115" ry="171" transform="rotate(9 943 502)"/>
+    <ellipse cx="1176" cy="710" rx="112" ry="165" transform="rotate(24 1176 710)"/>
+    <path fill-rule="evenodd" d="M784 710c126 0 193 162 267 242 57 60 89 119 89 186 0 80-57 136-159 136-89 0-145-49-197-49s-108 49-197 49c-102 0-159-56-159-136 0-67 32-126 89-186 74-80 141-242 267-242ZM656 926h256v62H656zm0 119h256v63H656z"/>
   </g>
 </svg>
