@@ -672,48 +672,50 @@ export function GroupView({
         )}
 
         {/* Riepilogo saldo rapido */}
-        <section className="card group-summary-bar" aria-label="Riepilogo del tuo saldo">
-          <div>
-            <div className="summary-balance-label">
-              Il tuo saldo
-              {isConvertedDisplay ? ` (mostrato in ${displayCurrency})` : ''}
+        {(tab === 'expenses' || tab === 'balances') && (
+          <section className="card group-summary-bar" aria-label="Riepilogo del tuo saldo">
+            <div>
+              <div className="summary-balance-label">
+                Il tuo saldo
+                {isConvertedDisplay ? ` (mostrato in ${displayCurrency})` : ''}
+              </div>
+              <div
+                className={`summary-balance-value tabular ${
+                  balanceHeadline.tone === 'positive'
+                    ? 'text-positive'
+                    : balanceHeadline.tone === 'negative'
+                      ? 'text-negative'
+                      : ''
+                }`}
+              >
+                {balanceHeadline.title}
+              </div>
+              <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
             </div>
-            <div
-              className={`summary-balance-value tabular ${
-                balanceHeadline.tone === 'positive'
-                  ? 'text-positive'
-                  : balanceHeadline.tone === 'negative'
-                    ? 'text-negative'
-                    : ''
-              }`}
-            >
-              {balanceHeadline.title}
-            </div>
-            <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
-          </div>
 
-          <div className="summary-actions">
-            {canEdit && myPrimaryTransfer && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => openSettleTransfer(myPrimaryTransfer)}
-              >
-                <ArrowLeftRight size={14} />
-                Segna rimborso
-              </button>
-            )}
-            {tab !== 'balances' && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setTab('balances')}
-              >
-                Vedi saldi
-              </button>
-            )}
-          </div>
-        </section>
+            <div className="summary-actions">
+              {canEdit && myPrimaryTransfer && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => openSettleTransfer(myPrimaryTransfer)}
+                >
+                  <ArrowLeftRight size={14} />
+                  Segna rimborso
+                </button>
+              )}
+              {tab !== 'balances' && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setTab('balances')}
+                >
+                  Vedi saldi
+                </button>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Navigazione schede Desktop */}
         <nav className="tabs-bar" aria-label="Sezioni del gruppo">
