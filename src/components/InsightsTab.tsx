@@ -230,41 +230,10 @@ export function InsightsTab({
         </div>
       ) : (
         <>
-          {/* Indicatori sintetici */}
-          <div className="kpi-grid">
-            <div className="card kpi-card">
-              <div>
-                <div className="kpi-label">Totale speso</div>
-                {insights.dailyAverage !== null && (
-                  <div className="kpi-sub tabular">
-                    Media {formatMoney(insights.dailyAverage, baseCurrency)}/giorno
-                  </div>
-                )}
-              </div>
-              <div className="kpi-value tabular">
-                {formatMoney(insights.totalSpent, baseCurrency)}
-              </div>
-            </div>
-
-            <div className="card kpi-card">
-              <div>
-                <div className="kpi-label">Numero di spese</div>
-                <div className="kpi-sub">
-                  in {insights.byCategory.length}{' '}
-                  {insights.byCategory.length === 1 ? 'categoria' : 'categorie'}
-                </div>
-              </div>
-              <div className="kpi-value tabular">{insights.expenseCount}</div>
-            </div>
-
-            <div className="card kpi-card">
-              <div>
-                <div className="kpi-label">Spesa media</div>
-                <div className="kpi-sub">in {baseCurrency}</div>
-              </div>
-              <div className="kpi-value tabular">
-                {formatMoney(insights.averageExpense, baseCurrency)}
-              </div>
+          <div className="card kpi-card">
+            <div className="kpi-label">Totale speso</div>
+            <div className="kpi-value tabular">
+              {formatMoney(insights.totalSpent, baseCurrency)}
             </div>
           </div>
 

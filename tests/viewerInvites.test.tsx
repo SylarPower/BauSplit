@@ -96,6 +96,22 @@ function openGroup(d = data, editor = false, repo: Partial<DataRepository> = {})
   return { ...render(<GroupView {...props} />), props };
 }
 
+it('mostra il saldo solo in Spese e Saldi e semplifica il riepilogo di Insights', () => {
+  openGroup(data, true, {});
+  const balance = () => screen.queryByRole('region', { name: 'Riepilogo del tuo saldo' });
+  expect(balance()).toBeTruthy();
+  click('Insights');
+  expect(balance()).toBeNull();
+  expect(screen.getByText('Totale speso')).toBeTruthy();
+  expect(screen.queryByText(/Numero di spese|Spesa media|\/giorno/i)).toBeNull();
+  click(/^Ricorrenti/);
+  expect(balance()).toBeNull();
+  click('Storico');
+  expect(balance()).toBeNull();
+  click('Saldi');
+  expect(balance()).toBeTruthy();
+});
+
 it('il lettore vede quote, saldo, dettagli, filtri e storico; nessun comando di scrittura desktop o mobile', () => {
   const getGroupInvites = vi.fn();
   const { container } = openGroup(data, false, { getGroupInvites });
