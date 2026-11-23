@@ -8,7 +8,6 @@ import {
 import { DEFAULT_CATEGORY_COLOR, entryCategories } from '../lib/categories';
 import { buildCategoryHistory, suggestCategoryKey } from '../lib/categorySuggestion';
 import {
-  CURRENCIES,
   formatMoney,
   formatDecimalInput,
   formatNumberIT,
@@ -35,6 +34,7 @@ import type {
 } from '../types';
 import { CategoryColorPicker } from './CategoryColorPicker';
 import { CategoryIconPicker } from './CategoryIconPicker';
+import { CurrencyPickerPopover } from './CurrencyPickerPopover';
 import { Avatar } from './Icon';
 import { Modal } from './Modal';
 import { RateInput } from './RateInput';
@@ -134,6 +134,11 @@ export function ExpenseFormModal({
     () => (open && !editingExpense ? buildCategoryHistory(groupId, expenses, catalog) : []),
     [open, editingExpense, groupId, expenses, catalog]
   );
+  const suggestedCurrencies = useMemo(() => {
+    const set = new Set<string>([baseCurrency]);
+    for (const e of expenses) set.add(e.currency);
+    return Array.from(set);
+  }, [baseCurrency, expenses]);
   const suggestedKey = useMemo(
     () => (categoryChoice.automatic ? suggestCategoryKey(description, history) : null),
     [categoryChoice.automatic, description, history]
@@ -568,18 +573,28 @@ export function ExpenseFormModal({
               onChange={(e) => setAmountStr(e.target.value)}
               required
             />
-            <select
-              className="select"
+            <CurrencyPickerPopover
+              variant="field"
               value={currency}
-              onChange={(e) => handleCurrencyChange(e.target.value)}
-              aria-label="Valuta della spesa"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.code} ({c.symbol})
-                </option>
-              ))}
-            </select>
+              baseCurrency={baseCurrency}
+              onChange={handleCurrencyChange}
+              suggestedCurrencies={suggestedCurrencies}
+              heading="Valuta della spesa"
+              ariaLabel="Valuta della spesa"
+              footerNote={
+                currency === baseCurrency ? (
+                  <>
+                    Valuta base del gruppo (<strong>{baseCurrency}</strong>). Scegline un&apos;altra
+                    per spese in valuta estera.
+                  </>
+                ) : (
+                  <>
+                    Verrà applicato il cambio automatico BCE per la data della spesa (sempre
+                    modificabile).
+                  </>
+                )
+              }
+            />
           </div>
         </div>
 

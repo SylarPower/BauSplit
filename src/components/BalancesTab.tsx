@@ -1,11 +1,6 @@
 import { Archive, ArrowLeftRight, ArrowRight, PawPrint, Pencil } from 'lucide-react';
 import { roundCurrency } from '../lib/accounting';
-import {
-  CURRENCIES,
-  formatMoney,
-  formatRateValue,
-  type ExchangeRateResult,
-} from '../lib/currencies';
+import { formatMoney, type ExchangeRateResult } from '../lib/currencies';
 import { formatFullDateIT } from '../lib/dates';
 import type {
   MemberBalance,
@@ -19,9 +14,7 @@ interface BalancesTabProps {
   isEvent?: boolean;
   baseCurrency: string;
   displayCurrency: string;
-  onDisplayCurrencyChange: (currency: string) => void;
   displayRate: ExchangeRateResult | null;
-  loadingDisplayRate: boolean;
   currentUserId: string;
   balances: MemberBalance[];
   transfers: SimplifiedTransfer[];
@@ -38,9 +31,7 @@ export function BalancesTab({
   isEvent = false,
   baseCurrency,
   displayCurrency,
-  onDisplayCurrencyChange,
   displayRate,
-  loadingDisplayRate,
   currentUserId,
   balances,
   transfers,
@@ -68,68 +59,6 @@ export function BalancesTab({
 
   return (
     <div className="section-stack">
-      {/* Selettore valuta di visualizzazione dei saldi (non modifica la contabilità del gruppo) */}
-      <div
-        className="card"
-        style={{
-          padding: '14px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 14,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 13.8, fontWeight: 600 }}>Valuta di visualizzazione dei saldi</div>
-          <div className="field-hint tabular">
-            {displayCurrency === baseCurrency ? (
-              <>
-                Contabilità del gruppo in <strong>{baseCurrency}</strong>. Puoi visualizzare i saldi
-                in un&apos;altra valuta senza modificare i conti.
-              </>
-            ) : loadingDisplayRate ? (
-              <>Conversione in {displayCurrency} in corso…</>
-            ) : displayRate ? (
-              <>
-                Solo visualizzazione (1 {baseCurrency} = {formatRateValue(displayRate.rate)}{' '}
-                {displayCurrency}
-                {displayRate.source === 'fallback'
-                  ? ', cambio indicativo'
-                  : ` · BCE ${formatFullDateIT(displayRate.effectiveDate)}`}
-                ). La contabilità resta in <strong>{baseCurrency}</strong>.
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {displayCurrency !== baseCurrency && (
-            <button
-              type="button"
-              className="link-btn"
-              style={{ fontSize: 12.5 }}
-              onClick={() => onDisplayCurrencyChange(baseCurrency)}
-            >
-              Torna a {baseCurrency}
-            </button>
-          )}
-          <select
-            className="select select-sm"
-            style={{ width: 'auto', minWidth: 150 }}
-            value={displayCurrency}
-            onChange={(e) => onDisplayCurrencyChange(e.target.value)}
-            aria-label="Valuta di visualizzazione dei saldi"
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.code} ({c.symbol}){c.code === baseCurrency ? ' · Base' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
       {/* Piano semplificato di rimborso */}
       <section>
         <div className="section-head">

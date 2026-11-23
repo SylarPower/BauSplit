@@ -23,6 +23,7 @@ import {
 import {
   fetchExchangeRate,
   formatMoney,
+  formatRateValue,
   type ExchangeRateResult,
 } from '../lib/currencies';
 import type { DataRepository } from '../lib/repository';
@@ -46,6 +47,7 @@ import type {
   SimplifiedTransfer,
 } from '../types';
 import { BalancesTab } from './BalancesTab';
+import { CurrencyPickerPopover } from './CurrencyPickerPopover';
 import { quickSummary, simplifyEventDebts } from '../lib/quickEvent';
 import { CopyEventSummary } from './CopyEventSummary';
 import { QuickEventForm } from './QuickEventForm';
@@ -171,6 +173,13 @@ export function GroupView({
     () => members.filter((m) => m.leftAt === null),
     [members]
   );
+
+  const usedCurrencies = useMemo(() => {
+    const set = new Set<string>([group.baseCurrency]);
+    for (const e of expenses) set.add(e.currency);
+    for (const s of settlements) set.add(s.currency);
+    return Array.from(set);
+  }, [group.baseCurrency, expenses, settlements]);
 
   const nameMap = useMemo(
     () => new Map(members.map((m) => [m.userId, m.displayName])),
@@ -453,7 +462,7 @@ export function GroupView({
           : `Ti devono ${formatBalanceSummary(myBalance)}`,
         sub: isConvertedDisplay
           ? `Contabilità gruppo: ${formatMoney(myBalance, group.baseCurrency, { signed: true })}`
-          : 'Saldo semplificato aggiornato',
+          : null,
         tone: 'positive' as const,
       };
     }
@@ -468,7 +477,7 @@ export function GroupView({
         : `Devi ${formatBalanceSummary(Math.abs(myBalance))}`,
       sub: isConvertedDisplay
         ? `Contabilità gruppo: ${formatMoney(myBalance, group.baseCurrency, { signed: true })}`
-        : 'Saldo semplificato aggiornato',
+        : null,
       tone: 'negative' as const,
     };
   }, [
@@ -536,7 +545,36 @@ export function GroupView({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                 <h1 className="page-title">{group.name}</h1>
-                <span className="badge">{group.baseCurrency}</span>
+                <CurrencyPickerPopover
+                  variant="badge"
+                  value={displayCurrency}
+                  baseCurrency={group.baseCurrency}
+                  onChange={setDisplayCurrency}
+                  suggestedCurrencies={usedCurrencies}
+                  heading="Visualizza saldi in"
+                  ariaLabel="Valuta di visualizzazione dei saldi"
+                  showResetButton
+                  footerNote={
+                    displayCurrency === group.baseCurrency ? (
+                      <>
+                        Contabilità del gruppo in <strong>{group.baseCurrency}</strong>. Puoi
+                        visualizzare i saldi in un&apos;altra valuta senza modificare i conti.
+                      </>
+                    ) : loadingDisplayRate ? (
+                      <>Conversione in {displayCurrency} in corso…</>
+                    ) : displayRate ? (
+                      <>
+                        1 {group.baseCurrency} = {formatRateValue(displayRate.rate)}{' '}
+                        {displayCurrency}
+                        {displayRate.source === 'fallback'
+                          ? ' (cambio indicativo)'
+                          : ` · BCE ${formatFullDateIT(displayRate.effectiveDate)}`}
+                        . Solo visualizzazione: la contabilità resta in{' '}
+                        <strong>{group.baseCurrency}</strong>.
+                      </>
+                    ) : null
+                  }
+                />
                 {!isEditor && <span className="badge"><Eye size={13} /> Solo visualizzazione</span>}
                 {isEvent && <span className="badge badge-accent">Serata</span>}
                 {isClosed && <span className="badge badge-warning">{isEvent ? 'Archiviata' : 'Gruppo chiuso'}</span>}
@@ -575,7 +613,7 @@ export function GroupView({
               </div>
             </div>
 
-            {canEdit && (
+            {canEdit && tab === 'expenses' && (
               <button
                 type="button"
                 className="btn btn-primary desktop-add-expense"
@@ -690,7 +728,9 @@ export function GroupView({
               >
                 {balanceHeadline.title}
               </div>
-              <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
+              {balanceHeadline.sub && (
+                <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
+              )}
             </div>
 
             <div className="summary-actions">
@@ -776,9 +816,7 @@ export function GroupView({
             canEdit={canEdit}
             baseCurrency={group.baseCurrency}
             displayCurrency={displayCurrency}
-            onDisplayCurrencyChange={setDisplayCurrency}
             displayRate={displayRate}
-            loadingDisplayRate={loadingDisplayRate}
             currentUserId={currentUserId}
             balances={balances}
             transfers={transfers}
@@ -837,7 +875,7 @@ export function GroupView({
       </div>
 
       {/* Bottone mobile rapido "+ Spesa" */}
-      {canEdit && (
+      {canEdit && tab === 'expenses' && (
         <button type="button" className="mobile-fab" onClick={openNewExpense}>
           <Plus size={19} strokeWidth={2.4} />
           Spesa

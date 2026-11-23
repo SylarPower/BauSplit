@@ -16,6 +16,10 @@ vi.mock('../src/lib/supabase', () => ({ translateErrorIT: String }));
 
 const change = (label: string, value: string) =>
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
+const pickExpenseCurrency = (code: string) => {
+  fireEvent.click(screen.getByRole('button', { name: 'Valuta della spesa' }));
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(`^${code}\\b`) }));
+};
 const click = (name: string | RegExp) => fireEvent.click(screen.getByRole('button', { name }));
 const flip = () => click('Inverti cambio');
 const quote = (inverse: boolean) => `Tasso di cambio: 1 ${inverse ? 'EUR in JPY' : 'JPY in EUR'}`;
@@ -68,7 +72,7 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
     render(<ExpenseFormModal {...expenseProps} />);
     change('Descrizione', 'Treno');
     change('Importo della spesa', '16000');
-    change('Valuta della spesa', 'JPY');
+    pickExpenseCurrency('JPY');
     expect(valueOf('Categoria')).toBe('altro');
     expect(screen.queryByRole('option', { name: /Dispensa/ })).toBeNull();
     flip();
@@ -100,7 +104,7 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
     render(<ExpenseFormModal {...expenseProps} />);
     change('Descrizione', 'Abbonamento');
     change('Importo della spesa', '1600');
-    change('Valuta della spesa', 'JPY');
+    pickExpenseCurrency('JPY');
     await waitFor(() => expect(valueOf(quote(false))).toBe('0,006'));
     flip();
     click(/Ripeti automaticamente/);
@@ -287,5 +291,61 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
       exchangeRate: 0.00625,
       rateIsManual: true,
     });
+  });
+
+  it('il popover valuta spesa supporta valute usate nel gruppo, ricerca ed Escape senza chiudere la modale', async () => {
+    const usedExpense: Expense = {
+      id: 'e-used',
+      groupId: 'g1',
+      description: 'Hotel',
+      amount: 100,
+      currency: 'PLN',
+      exchangeRate: 0.23,
+      rateIsManual: false,
+      rateDate: '2026-01-02',
+      baseAmount: 23,
+      expenseDate: '2026-01-02',
+      paidBy: 'Anna',
+      splitMode: 'equal',
+      splits: members.map((m) => ({
+        userId: m.userId,
+        amount: 50,
+        baseAmount: 11.5,
+        percentage: null,
+      })),
+      category: 'altro',
+      categoryLabel: 'Altro',
+      note: '',
+      recurringId: null,
+      recurringOccurrenceDate: null,
+      createdBy: 'Anna',
+      updatedBy: 'Anna',
+      createdAt: '2026-01-02',
+      updatedAt: '2026-01-02',
+    };
+    render(<ExpenseFormModal {...expenseProps} expenses={[usedExpense]} />);
+
+    const trigger = screen.getByRole('button', { name: 'Valuta della spesa' });
+    fireEvent.click(trigger);
+
+    const popover = screen.getByRole('region', { name: 'Valuta della spesa' });
+    expect(popover).toBeTruthy();
+    // Mostra la valuta usata nello storico del gruppo tra i pulsanti rapidi
+    expect(popover.textContent).toContain('PLN');
+
+    // Escape chiude solo il popover, mantenendo aperta la modale Nuova spesa
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Valuta della spesa' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Nuova spesa' })).toBeTruthy();
+
+    // Riapri, cerca per nome italiano e seleziona Franco svizzero (CHF)
+    fireEvent.click(trigger);
+    const search = screen.getByLabelText('Cerca valuta');
+    fireEvent.change(search, { target: { value: 'Franco' } });
+    fireEvent.click(screen.getByRole('option', { name: /CHF/ }));
+
+    expect(screen.queryByRole('region', { name: 'Valuta della spesa' })).toBeNull();
+    expect(trigger.textContent).toContain('CHF');
+    await waitFor(() => expect(fetchExchangeRate).toHaveBeenCalledWith('CHF', 'EUR', expect.any(String)));
   });
 });
