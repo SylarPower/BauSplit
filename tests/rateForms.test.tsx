@@ -348,4 +348,31 @@ describe('Inserimento e salvataggio del cambio nei moduli', () => {
     expect(trigger.textContent).toContain('CHF');
     await waitFor(() => expect(fetchExchangeRate).toHaveBeenCalledWith('CHF', 'EUR', expect.any(String)));
   });
+
+  it('con il popover valuta spesa aperto, cliccare fuori chiude solo il popover senza chiudere o attivare la modale', () => {
+    const onClose = vi.fn();
+    render(<ExpenseFormModal {...expenseProps} onClose={onClose} />);
+
+    const trigger = screen.getByRole('button', { name: 'Valuta della spesa' });
+    fireEvent.click(trigger);
+    expect(screen.getByRole('region', { name: 'Valuta della spesa' })).toBeTruthy();
+
+    // Click sul pulsante Annulla mentre il popover è aperto -> chiude solo il popover
+    fireEvent.click(screen.getByRole('button', { name: 'Annulla' }));
+    expect(screen.queryByRole('region', { name: 'Valuta della spesa' })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Riapri e clicca sullo sfondo della modale -> mousedown + click sul backdrop esterno
+    fireEvent.click(trigger);
+    expect(screen.getByRole('region', { name: 'Valuta della spesa' })).toBeTruthy();
+    const modalBackdrop = screen.getByRole('dialog', { name: 'Nuova spesa' });
+    fireEvent.mouseDown(modalBackdrop);
+    fireEvent.click(modalBackdrop);
+    expect(screen.queryByRole('region', { name: 'Valuta della spesa' })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Ora che il popover è chiuso, Annulla chiude normalmente la modale
+    fireEvent.click(screen.getByRole('button', { name: 'Annulla' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

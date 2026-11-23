@@ -56,6 +56,7 @@ export function CurrencyPickerPopover({
   });
 
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -144,12 +145,26 @@ export function CurrencyPickerPopover({
       });
     }
 
-    const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as Node | null;
-      if (!target) return;
-      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
-        return;
-      }
+    const isInsidePicker = (target: Node | null) =>
+      Boolean(
+        target && (popoverRef.current?.contains(target) || backdropRef.current?.contains(target))
+      );
+
+    const onPointerDownCapture = (e: Event) => {
+      if (isInsidePicker(e.target as Node | null)) return;
+      e.stopPropagation();
+    };
+
+    const onMouseDownCapture = (e: MouseEvent) => {
+      if (isInsidePicker(e.target as Node | null)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onClickCapture = (e: MouseEvent) => {
+      if (isInsidePicker(e.target as Node | null)) return;
+      e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     };
 
@@ -164,13 +179,17 @@ export function CurrencyPickerPopover({
 
     const onScrollOrResize = () => updatePlacement();
 
-    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('pointerdown', onPointerDownCapture, true);
+    document.addEventListener('mousedown', onMouseDownCapture, true);
+    document.addEventListener('click', onClickCapture, true);
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('resize', onScrollOrResize);
     window.addEventListener('scroll', onScrollOrResize, true);
     return () => {
       cancelAnimationFrame(rafId);
-      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('pointerdown', onPointerDownCapture, true);
+      document.removeEventListener('mousedown', onMouseDownCapture, true);
+      document.removeEventListener('click', onClickCapture, true);
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', onScrollOrResize);
       window.removeEventListener('scroll', onScrollOrResize, true);
@@ -186,18 +205,36 @@ export function CurrencyPickerPopover({
   const popoverNode =
     open && !disabled && typeof document !== 'undefined'
       ? createPortal(
-          <div
-            ref={popoverRef}
-            className="currency-popover-panel"
-            style={{
-              left: placement.left,
-              top: placement.top,
-              bottom: placement.bottom,
-              width: placement.width,
-            }}
-            role="region"
-            aria-label={heading}
-          >
+          <>
+            <div
+              ref={backdropRef}
+              className="currency-popover-backdrop"
+              aria-hidden="true"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setOpen(false);
+              }}
+            />
+            <div
+              ref={popoverRef}
+              className="currency-popover-panel"
+              style={{
+                left: placement.left,
+                top: placement.top,
+                bottom: placement.bottom,
+                width: placement.width,
+              }}
+              role="region"
+              aria-label={heading}
+            >
             <div className="currency-popover-head">
               <strong className="currency-popover-title">{heading}</strong>
               {isConverted && (
@@ -305,7 +342,8 @@ export function CurrencyPickerPopover({
             </div>
 
             {footerNote && <div className="currency-popover-footer field-hint tabular">{footerNote}</div>}
-          </div>,
+          </div>
+          </>,
           document.body
         )
       : null;

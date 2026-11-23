@@ -1898,6 +1898,20 @@ textarea:focus-visible {
   color: var(--text-muted);
 }
 
+.currency-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 149;
+  background: transparent;
+  touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+  .currency-popover-backdrop {
+    cursor: pointer;
+  }
+}
+
 .currency-popover-panel {
   position: fixed;
   z-index: 150;
