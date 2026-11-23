@@ -398,11 +398,11 @@ export type ExpenseListFilterType = 'all' | 'expenses' | 'settlements';
 
 export type DateRangePreset =
   | 'all'
+  | 'this_week'
   | 'this_month'
   | 'last_month'
-  | 'last_30_days'
-  | 'last_3_months'
   | 'this_year'
+  | 'last_year'
   | 'custom';
 
 export interface ExpenseFilters {

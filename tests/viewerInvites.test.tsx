@@ -112,6 +112,57 @@ it('mostra il saldo solo in Spese e Saldi e semplifica il riepilogo di Insights'
   expect(balance()).toBeTruthy();
 });
 
+it('offre solo i filtri temporali richiesti in Spese e Insights e filtra Questa settimana e Anno scorso', () => {
+  const today = todayISO();
+  const prevYear = Number(today.slice(0, 4)) - 1;
+  const expectedLabels = [
+    'Tutto il periodo',
+    'Questa settimana',
+    'Questo mese',
+    'Mese scorso',
+    "Quest'anno",
+    'Anno scorso',
+    'Intervallo personalizzato',
+  ];
+  const timedData: GroupData = {
+    ...data,
+    expenses: [
+      { ...expense('Spesa corrente', 30, 'a', ['a', 's']), id: 'e-now', expenseDate: today },
+      {
+        ...expense('Spesa anno scorso', 70, 'a', ['a', 's']),
+        id: 'e-prev',
+        expenseDate: `${prevYear}-06-15`,
+      },
+    ],
+    settlements: [],
+  };
+  openGroup(timedData, true, {});
+
+  click('Filtri');
+  const expensePeriod = screen.getByLabelText('Periodo') as HTMLSelectElement;
+  expect(Array.from(expensePeriod.options).map((o) => o.text)).toEqual(expectedLabels);
+
+  fireEvent.change(expensePeriod, { target: { value: 'this_week' } });
+  expect(screen.getByText('Spesa corrente')).toBeTruthy();
+  expect(screen.queryByText('Spesa anno scorso')).toBeNull();
+
+  fireEvent.change(expensePeriod, { target: { value: 'last_year' } });
+  expect(screen.queryByText('Spesa corrente')).toBeNull();
+  expect(screen.getByText('Spesa anno scorso')).toBeTruthy();
+
+  click('Insights');
+  const insightsPeriod = screen.getByLabelText(
+    'Seleziona periodo degli Insights'
+  ) as HTMLSelectElement;
+  expect(Array.from(insightsPeriod.options).map((o) => o.text)).toEqual(expectedLabels);
+
+  fireEvent.change(insightsPeriod, { target: { value: 'this_week' } });
+  expect(screen.getAllByText(/30,00/).length).toBeGreaterThan(0);
+
+  fireEvent.change(insightsPeriod, { target: { value: 'last_year' } });
+  expect(screen.getAllByText(/70,00/).length).toBeGreaterThan(0);
+});
+
 it('il lettore vede quote, saldo, dettagli, filtri e storico; nessun comando di scrittura desktop o mobile', () => {
   const getGroupInvites = vi.fn();
   const { container } = openGroup(data, false, { getGroupInvites });
