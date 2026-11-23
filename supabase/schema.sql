@@ -2208,10 +2208,30 @@ begin
 end;
 $$;
 
+create or replace function public.get_group_actor_links(p_group_id uuid)
+returns table(guest_id uuid, account_id uuid)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not public.is_active_group_member(p_group_id) then
+    raise exception 'Accesso non consentito';
+  end if;
+  return query
+    select a.guest_id, a.account_id
+    from bausplit_private.account_links a
+    where a.completed_at is not null
+      and exists (
+        select 1 from public.activity_logs l
+        where l.group_id = p_group_id and l.actor_id = a.guest_id
+      );
+end;
+$$;
+
 revoke all on function public.authorize_guest_link(uuid), public.link_guest_groups(uuid),
+  public.get_group_actor_links(uuid),
   public.add_group_participant(uuid,text), public.accept_group_invite(text,uuid,text),
   public.get_invite_preview(text), public.create_expense_group(text,text,text,text[]) from public, anon;
 grant execute on function public.authorize_guest_link(uuid), public.link_guest_groups(uuid),
+  public.get_group_actor_links(uuid),
   public.add_group_participant(uuid,text) to authenticated;
 
 -- -----------------------------------------------------------------------------

@@ -53,7 +53,7 @@ import {
   collectDueOccurrences,
   FREQUENCY_LABELS,
 } from './recurring';
-import { supabase } from './supabase';
+import { isMissingSchemaError, supabase } from './supabase';
 
 export interface CreatorRepository {
   previewRemoval(groupId: string, seatId: string): Promise<RemovalPreview>;
@@ -903,6 +903,26 @@ export class SupabaseRepository implements DataRepository {
       ? await this.client.rpc('get_quick_event_matches', { p_event_id: groupId })
       : null;
     if (matches?.error) throw matches.error;
+
+    const distinctLogActors = new Set((logsRes.data ?? []).map((l) => l.actor_id)).size;
+    let actorLinks: Record<string, string> | undefined;
+    if (group.creatorOwnerId && group.createdBy && group.createdBy !== group.creatorOwnerId) {
+      actorLinks = { [group.createdBy]: group.creatorOwnerId };
+    }
+    if (distinctLogActors > 1) {
+      const linksRes = await this.client.rpc('get_group_actor_links', { p_group_id: groupId });
+      if (linksRes.error) {
+        if (!isMissingSchemaError(linksRes.error)) throw linksRes.error;
+      } else {
+        for (const row of (linksRes.data ?? []) as { guest_id: string; account_id: string }[]) {
+          if (row.guest_id && row.account_id) {
+            actorLinks ??= {};
+            actorLinks[String(row.guest_id)] = String(row.account_id);
+          }
+        }
+      }
+    }
+
     const members = (membersRes.data ?? []).map(mapMember);
     const actorNames = new Map(members.map((m) => [m.ownerId, m.displayName]));
 
@@ -1009,6 +1029,7 @@ export class SupabaseRepository implements DataRepository {
       group,
       members,
       categories,
+      actorLinks,
       quickMatches: (matches?.data ?? []).map((row: { peer_id: string; group_id: string; target_peer: string; can_carry: boolean }) => ({
         peerId: row.peer_id, groupId: row.group_id, seatId: row.target_peer, canCarry: row.can_carry,
       })),

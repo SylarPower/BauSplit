@@ -163,6 +163,171 @@ it('offre solo i filtri temporali richiesti in Spese e Insights e filtra Questa 
   expect(screen.getAllByText(/70,00/).length).toBeGreaterThan(0);
 });
 
+it('permette di confrontare due periodi in Insights (automatico e personalizzabile) con variazione € e %', () => {
+  const today = todayISO();
+  const [yStr, mStr, dStr] = today.split('-');
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const prevY = m === 1 ? y - 1 : y;
+  const prevM = m === 1 ? 12 : m - 1;
+  const prevMonthFirst = `${prevY}-${String(prevM).padStart(2, '0')}-01`;
+  // Data nel mese scorso ma oltre il giorno corrente (se non è il 31), per verificare la parità di giorni trascorsi
+  const prevMonthLate = `${prevY}-${String(prevM).padStart(2, '0')}-28`;
+
+  const compareData: GroupData = {
+    ...data,
+    categories: [
+      { name: 'Spesa alimentare', key: 'spesa', color: '#0F766E', icon: 'shopping-basket', hidden: false },
+      { name: 'Casa', key: 'casa', color: '#BE185D', icon: 'home', hidden: false },
+      { name: 'Viaggi', key: 'viaggi', color: '#2563EB', icon: 'plane', hidden: false },
+    ],
+    expenses: [
+      {
+        ...expense('Supermercato oggi', 120, 'a', ['a', 's']),
+        id: 'c1',
+        expenseDate: today,
+        category: 'spesa',
+        categoryLabel: 'Spesa alimentare',
+      },
+      {
+        ...expense('Lampada oggi', 40, 'a', ['a', 's']),
+        id: 'c2',
+        expenseDate: today,
+        category: 'casa',
+        categoryLabel: 'Casa',
+      },
+      {
+        ...expense('Supermercato mese scorso', 100, 'a', ['a', 's']),
+        id: 'p1',
+        expenseDate: prevMonthFirst,
+        category: 'spesa',
+        categoryLabel: 'Spesa alimentare',
+      },
+      {
+        ...expense('Treno mese scorso', 50, 'a', ['a', 's']),
+        id: 'p2',
+        expenseDate: prevMonthFirst,
+        category: 'viaggi',
+        categoryLabel: 'Viaggi',
+      },
+      ...(Number(dStr) < 28
+        ? [
+            {
+              ...expense('Fine mese scorso', 200, 'a', ['a', 's']),
+              id: 'p3',
+              expenseDate: prevMonthLate,
+              category: 'viaggi',
+              categoryLabel: 'Viaggi',
+            },
+          ]
+        : []),
+    ],
+    settlements: [],
+  };
+
+  openGroup(compareData, true, {});
+  click('Insights');
+
+  fireEvent.change(screen.getByLabelText('Seleziona periodo degli Insights'), {
+    target: { value: 'this_month' },
+  });
+  click('Confronta');
+
+  // Confronto automatico di default: Questo mese (160 €) vs Mese scorso a parità di giorni (150 €)
+  expect(screen.getByLabelText('Periodo di confronto')).toBeTruthy();
+  expect(screen.getByText(/\+10,00 € \(\+6,7%\)/)).toBeTruthy();
+  expect(screen.getByText(/\+20,00 € \(\+20,0%\)/)).toBeTruthy();
+  expect(screen.getByText(/\+40,00 € · Nuova/)).toBeTruthy();
+  expect(screen.getByText(/−50,00 € \(−100,0%\)/)).toBeTruthy();
+
+  // Disattivando "Stesso punto del periodo" include anche la spesa del 28 del mese scorso (totale B = 350 €)
+  if (Number(dStr) < 28) {
+    const parityCheckbox = screen.getByRole('checkbox', {
+      name: /Stesso punto del periodo/i,
+    });
+    fireEvent.click(parityCheckbox);
+    expect(screen.getByText(/−190,00 € \(−54,3%\)/)).toBeTruthy();
+  }
+
+  // Personalizzazione manuale del periodo di confronto
+  fireEvent.change(screen.getByLabelText('Periodo di confronto'), {
+    target: { value: 'custom' },
+  });
+  fireEvent.change(screen.getByLabelText('Confronto dal'), {
+    target: { value: '2020-01-01' },
+  });
+  fireEvent.change(screen.getByLabelText('Confronto al'), {
+    target: { value: '2020-01-31' },
+  });
+  expect(screen.getByText(/\+160,00 €/)).toBeTruthy();
+});
+
+it('nello Storico unifica nello stesso filtro ospite e account collegato tramite actorLinks', () => {
+  const linkedData: GroupData = {
+    ...data,
+    members: [
+      member('seat-gab', 'Gabriele', 'acc-gab'),
+      member('seat-anna', 'Anna', 'acc-anna'),
+    ],
+    actorLinks: {
+      'guest-gab': 'acc-gab',
+    },
+    activityLogs: [
+      {
+        id: 'log-acc',
+        groupId: 'ev',
+        actorName: 'Gabriele',
+        actorId: 'acc-gab',
+        entityType: 'expense',
+        entityId: dinner.id,
+        action: 'created',
+        summary: 'Ha aggiunto Cena dopo registrazione',
+        changes: {},
+        createdAt: '2026-11-20T18:00:00Z',
+      },
+      {
+        id: 'log-guest',
+        groupId: 'ev',
+        actorName: 'Gabriele',
+        actorId: 'guest-gab',
+        entityType: 'group',
+        entityId: 'ev',
+        action: 'created',
+        summary: 'Ha creato il gruppo da ospite',
+        changes: {},
+        createdAt: '2026-11-18T18:00:00Z',
+      },
+      {
+        id: 'log-anna',
+        groupId: 'ev',
+        actorName: 'Anna',
+        actorId: 'acc-anna',
+        entityType: 'expense',
+        entityId: dinner.id,
+        action: 'updated',
+        summary: 'Ha modificato una spesa',
+        changes: {},
+        createdAt: '2026-11-19T18:00:00Z',
+      },
+    ],
+  };
+
+  openGroup(linkedData, true, {});
+  click('Storico');
+
+  const actorSelect = screen.getByLabelText('Filtra storico per membro') as HTMLSelectElement;
+  expect(Array.from(actorSelect.options).map((o) => o.text)).toEqual([
+    'Tutti i membri',
+    'Gabriele',
+    'Anna',
+  ]);
+
+  fireEvent.change(actorSelect, { target: { value: 'acc-gab' } });
+  expect(screen.getByText(/aggiunto Cena dopo registrazione/)).toBeTruthy();
+  expect(screen.getByText(/creato il gruppo da ospite/)).toBeTruthy();
+  expect(screen.queryByText(/modificato una spesa/)).toBeNull();
+});
+
 it('il lettore vede quote, saldo, dettagli, filtri e storico; nessun comando di scrittura desktop o mobile', () => {
   const getGroupInvites = vi.fn();
   const { container } = openGroup(data, false, { getGroupInvites });

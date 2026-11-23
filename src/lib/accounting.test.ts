@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { Expense, GroupMember, Settlement } from '../types';
 import {
+  computeComparisonDelta,
   computeExpenseSplits,
   computeGroupInsights,
   computeMemberBalances,
   convertToBaseAmount,
+  mergeCategoryComparisons,
   simplifyDebts,
 } from './accounting';
 import { buildExpenseUpdatedLog } from './audit';
 import { parseDecimalInput } from './currencies';
 import { generateGroupCsv } from './csv';
-import { DATE_PRESET_LABELS, resolveDatePreset } from './dates';
+import { DATE_PRESET_LABELS, resolveComparisonPeriod, resolveDatePreset } from './dates';
 import { advanceRecurringDate, collectDueOccurrences } from './recurring';
 import { extractInviteToken } from './supabase';
 
@@ -434,5 +436,181 @@ describe('ricorrenze, numeri, inviti, audit e CSV', () => {
       from: '2026-03-10',
       to: '2026-03-20',
     });
+  });
+
+  it('calcola il periodo di confronto con parità di giorni trascorsi e i delta per totale e categorie', () => {
+    // Periodo in corso (Questo mese al 20 nov) -> confronto automatico 1–20 ott
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'this_month',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-11-20',
+      })
+    ).toEqual({
+      rangeA: { from: '2026-11-01', to: '2026-11-20' },
+      rangeB: { from: '2026-10-01', to: '2026-10-20' },
+      valid: true,
+      isOngoingA: true,
+      appliedElapsedParity: true,
+    });
+
+    // Disattivando la parità confronta i due mesi interi
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'this_month',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: false,
+        refISO: '2026-11-20',
+      })
+    ).toEqual({
+      rangeA: { from: '2026-11-01', to: '2026-11-30' },
+      rangeB: { from: '2026-10-01', to: '2026-10-31' },
+      valid: true,
+      isOngoingA: true,
+      appliedElapsedParity: false,
+    });
+
+    // Fine marzo (31) rispetto a febbraio (28) e anno bisestile (29 feb -> 28 feb)
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'this_month',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-03-31',
+      }).rangeB
+    ).toEqual({ from: '2026-02-01', to: '2026-02-28' });
+
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'this_year',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2024-02-29',
+      })
+    ).toMatchObject({
+      rangeA: { from: '2024-01-01', to: '2024-02-29' },
+      rangeB: { from: '2023-01-01', to: '2023-02-28' },
+      valid: true,
+    });
+
+    // Questa settimana (ven 20 nov) -> lun–ven sett. scorsa
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'this_week',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-11-20',
+      })
+    ).toMatchObject({
+      rangeA: { from: '2026-11-16', to: '2026-11-20' },
+      rangeB: { from: '2026-11-09', to: '2026-11-13' },
+      valid: true,
+    });
+
+    // Periodi chiusi (Mese scorso -> due mesi fa, Anno scorso -> due anni fa) e personalizzato
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'last_month',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-02-10',
+      })
+    ).toMatchObject({
+      rangeA: { from: '2026-01-01', to: '2026-01-31' },
+      rangeB: { from: '2025-12-01', to: '2025-12-31' },
+      isOngoingA: false,
+      appliedElapsedParity: false,
+      valid: true,
+    });
+
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'custom',
+        customAFrom: '2026-11-01',
+        customATo: '2026-11-10',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-11-20',
+      }).rangeB
+    ).toEqual({ from: '2026-10-22', to: '2026-10-31' });
+
+    expect(
+      resolveComparisonPeriod({
+        presetA: 'all',
+        customAFrom: '',
+        customATo: '',
+        comparePreset: 'auto',
+        compareCustomFrom: '',
+        compareCustomTo: '',
+        matchElapsed: true,
+        refISO: '2026-11-20',
+      }).valid
+    ).toBe(false);
+
+    // Delta e unione categorie (nuova, in calo a 0, invariata)
+    expect(computeComparisonDelta(125, 100, 'EUR')).toEqual({
+      diff: 25,
+      percentage: 25,
+      kind: 'up',
+    });
+    expect(computeComparisonDelta(0, 50, 'EUR')).toEqual({
+      diff: -50,
+      percentage: -100,
+      kind: 'down',
+    });
+    expect(computeComparisonDelta(40, 0, 'EUR')).toEqual({
+      diff: 40,
+      percentage: null,
+      kind: 'new',
+    });
+    expect(computeComparisonDelta(0, 0, 'EUR')).toEqual({
+      diff: 0,
+      percentage: 0,
+      kind: 'equal',
+    });
+
+    const merged = mergeCategoryComparisons(
+      [
+        { key: 'spesa', label: 'Spesa', icon: 'shopping-basket', color: '#0F766E', total: 120, count: 2, percentage: 75 },
+        { key: 'casa', label: 'Casa', icon: 'home', color: '#BE185D', total: 40, count: 1, percentage: 25 },
+      ],
+      [
+        { key: 'spesa', label: 'Spesa', icon: 'shopping-basket', color: '#0F766E', total: 100, count: 2, percentage: 66.7 },
+        { key: 'viaggi', label: 'Viaggi', icon: 'plane', color: '#2563EB', total: 50, count: 1, percentage: 33.3 },
+      ],
+      'EUR'
+    );
+    expect(merged.map((c) => [c.key, c.totalA, c.totalB, c.delta.kind])).toEqual([
+      ['spesa', 120, 100, 'up'],
+      ['casa', 40, 0, 'new'],
+      ['viaggi', 0, 50, 'down'],
+    ]);
   });
 });

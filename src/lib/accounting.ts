@@ -1,6 +1,8 @@
 import type {
+  CategoryComparisonItem,
   CategoryInsight,
   CategoryOption,
+  ComparisonDelta,
   Expense,
   ExpenseSplit,
   GroupInsights,
@@ -706,4 +708,67 @@ export function computeGroupInsights(
     byMonth,
     excludedSettlementsCount,
   };
+}
+
+export function computeComparisonDelta(
+  amountA: number,
+  amountB: number,
+  baseCurrency: string
+): ComparisonDelta {
+  const unitsA = toMinorUnits(amountA, baseCurrency);
+  const unitsB = toMinorUnits(amountB, baseCurrency);
+  const diffUnits = unitsA - unitsB;
+  const diff = fromMinorUnits(diffUnits, baseCurrency);
+
+  if (unitsB === 0) {
+    if (unitsA === 0) return { diff: 0, percentage: 0, kind: 'equal' };
+    return { diff, percentage: null, kind: unitsA > 0 ? 'new' : 'down' };
+  }
+  if (diffUnits === 0) return { diff: 0, percentage: 0, kind: 'equal' };
+  const percentage = Number(((diffUnits / unitsB) * 100).toFixed(1));
+  return {
+    diff,
+    percentage,
+    kind: diffUnits > 0 ? 'up' : 'down',
+  };
+}
+
+export function mergeCategoryComparisons(
+  categoriesA: CategoryInsight[],
+  categoriesB: CategoryInsight[],
+  baseCurrency: string
+): CategoryComparisonItem[] {
+  const map = new Map<string, { a?: CategoryInsight; b?: CategoryInsight }>();
+  for (const cat of categoriesA) map.set(cat.key, { a: cat });
+  for (const cat of categoriesB) {
+    const existing = map.get(cat.key);
+    if (existing) existing.b = cat;
+    else map.set(cat.key, { b: cat });
+  }
+
+  return Array.from(map.entries())
+    .map(([key, { a, b }]) => {
+      const ref = a ?? b!;
+      const totalA = a?.total ?? 0;
+      const totalB = b?.total ?? 0;
+      return {
+        key,
+        label: ref.label,
+        icon: ref.icon,
+        color: ref.color,
+        totalA,
+        countA: a?.count ?? 0,
+        percentageA: a?.percentage ?? 0,
+        totalB,
+        countB: b?.count ?? 0,
+        percentageB: b?.percentage ?? 0,
+        delta: computeComparisonDelta(totalA, totalB, baseCurrency),
+      };
+    })
+    .sort(
+      (x, y) =>
+        toMinorUnits(y.totalA, baseCurrency) - toMinorUnits(x.totalA, baseCurrency) ||
+        toMinorUnits(y.totalB, baseCurrency) - toMinorUnits(x.totalB, baseCurrency) ||
+        x.label.localeCompare(y.label, 'it')
+    );
 }

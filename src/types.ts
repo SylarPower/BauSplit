@@ -224,6 +224,7 @@ export interface QuickEventMatch {
 
 export interface GroupData {
   quickMatches?: QuickEventMatch[];
+  actorLinks?: Record<string, string>; // guestId -> accountId verificato da account_links
   group: ExpenseGroup;
   members: GroupMember[]; // tutti i membri (attivi e usciti per risolvere i nomi storici)
   categories: CategoryOption[]; // catalogo del gruppo, incluse quelle nascoste
@@ -404,6 +405,28 @@ export type DateRangePreset =
   | 'this_year'
   | 'last_year'
   | 'custom';
+
+export type CompareDatePreset = 'auto' | Exclude<DateRangePreset, 'all'>;
+
+export interface ComparisonDelta {
+  diff: number;
+  percentage: number | null; // null quando il periodo di confronto è 0 e quello attuale > 0
+  kind: 'up' | 'down' | 'equal' | 'new';
+}
+
+export interface CategoryComparisonItem {
+  key: string;
+  label: string;
+  icon: string;
+  color: string;
+  totalA: number;
+  countA: number;
+  percentageA: number;
+  totalB: number;
+  countB: number;
+  percentageB: number;
+  delta: ComparisonDelta;
+}
 
 export interface ExpenseFilters {
   search: string;
