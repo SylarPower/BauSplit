@@ -167,6 +167,31 @@ it('sostituisce la card valuta di Saldi con il badge interattivo e popover ricco
   expect(screen.queryByText(/mostrato in USD/)).toBeNull();
 });
 
+it('il click fuori dal popover valuta chiude prima il popover senza attivare l’elemento sottostante', () => {
+  openGroup(data, true, {});
+  const badgeBtn = screen.getByRole('button', { name: 'Valuta di visualizzazione dei saldi' });
+
+  // Apre il popover e clicca sopra una riga spesa: la modale dettaglio spesa NON si deve aprire
+  fireEvent.click(badgeBtn);
+  expect(screen.getByRole('region', { name: 'Visualizza saldi in' })).toBeTruthy();
+
+  fireEvent.click(screen.getByText('Cena in due'));
+  expect(screen.queryByRole('region', { name: 'Visualizza saldi in' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
+
+  // Ora che il popover è chiuso, il secondo click apre normalmente la spesa
+  fireEvent.click(screen.getByText('Cena in due'));
+  expect(screen.getByRole('dialog', { name: 'Dettaglio spesa' })).toBeTruthy();
+  click('Chiudi finestra');
+
+  // Riapre il popover e clicca su un altro tab: il tab non deve cambiare al primo click
+  fireEvent.click(badgeBtn);
+  expect(screen.getByRole('region', { name: 'Visualizza saldi in' })).toBeTruthy();
+  click('Insights');
+  expect(screen.queryByRole('region', { name: 'Visualizza saldi in' })).toBeNull();
+  expect(screen.getByText('Cena in due')).toBeTruthy();
+});
+
 it('offre solo i filtri temporali richiesti in Spese e Insights e filtra Questa settimana e Anno scorso', () => {
   const today = todayISO();
   const prevYear = Number(today.slice(0, 4)) - 1;
