@@ -96,20 +96,75 @@ function openGroup(d = data, editor = false, repo: Partial<DataRepository> = {})
   return { ...render(<GroupView {...props} />), props };
 }
 
-it('mostra il saldo solo in Spese e Saldi e semplifica il riepilogo di Insights', () => {
-  openGroup(data, true, {});
+it('mostra il saldo solo in Spese e Saldi, nasconde la dicitura superflua e limita Aggiungi spesa al tab Spese', () => {
+  const { container } = openGroup(data, true, {});
   const balance = () => screen.queryByRole('region', { name: 'Riepilogo del tuo saldo' });
+  const addButtons = () => container.querySelectorAll('.mobile-fab,.desktop-add-expense');
+
   expect(balance()).toBeTruthy();
+  expect(screen.queryByText('Saldo semplificato aggiornato')).toBeNull();
+  expect(addButtons()).toHaveLength(2);
+
   click('Insights');
   expect(balance()).toBeNull();
+  expect(addButtons()).toHaveLength(0);
   expect(screen.getByText('Totale speso')).toBeTruthy();
   expect(screen.queryByText(/Numero di spese|Spesa media|\/giorno/i)).toBeNull();
+
   click(/^Ricorrenti/);
   expect(balance()).toBeNull();
+  expect(addButtons()).toHaveLength(0);
+
   click('Storico');
   expect(balance()).toBeNull();
+  expect(addButtons()).toHaveLength(0);
+
   click('Saldi');
   expect(balance()).toBeTruthy();
+  expect(screen.queryByText('Saldo semplificato aggiornato')).toBeNull();
+  expect(screen.queryByText('Valuta di visualizzazione dei saldi')).toBeNull();
+  expect(addButtons()).toHaveLength(0);
+});
+
+it('sostituisce la card valuta di Saldi con il badge interattivo e popover ricco nel titolo gruppo', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ date: '2026-11-20', rates: { USD: 1.08 } }),
+    }))
+  );
+  localStorage.clear();
+  openGroup(data, true, {});
+
+  click('Saldi');
+  expect(screen.queryByText('Valuta di visualizzazione dei saldi')).toBeNull();
+
+  const badgeBtn = screen.getByRole('button', { name: 'Valuta di visualizzazione dei saldi' });
+  expect(badgeBtn.textContent).toContain('EUR');
+
+  fireEvent.click(badgeBtn);
+  const popover = screen.getByRole('region', { name: 'Visualizza saldi in' });
+  expect(popover.textContent).toContain('Contabilità del gruppo in EUR');
+
+  const search = within(popover).getByLabelText('Cerca valuta');
+  fireEvent.change(search, { target: { value: 'Dollaro USA' } });
+  fireEvent.click(within(popover).getByRole('option', { name: /USD/ }));
+
+  await waitFor(() => {
+    expect(screen.getByText(/mostrato in USD/)).toBeTruthy();
+  });
+  expect(badgeBtn.textContent).toContain('Vista USD · base EUR');
+  expect(screen.getAllByText(/19,44/).length).toBeGreaterThan(0);
+
+  // Riaprendo il popover mostra il dettaglio BCE e permette il reset
+  fireEvent.click(badgeBtn);
+  const openPopover = screen.getByRole('region', { name: 'Visualizza saldi in' });
+  expect(openPopover.textContent).toContain('1 EUR = 1,08 USD');
+  fireEvent.click(within(openPopover).getByRole('button', { name: 'Torna a EUR' }));
+
+  expect(badgeBtn.textContent).toBe('EUR');
+  expect(screen.queryByText(/mostrato in USD/)).toBeNull();
 });
 
 it('offre solo i filtri temporali richiesti in Spese e Insights e filtra Questa settimana e Anno scorso', () => {
