@@ -1,4 +1,4 @@
-import type { DateRangePreset } from '../types';
+import type { CompareDatePreset, DateRangePreset } from '../types';
 
 export function todayISO(now: Date = new Date()): string {
   const y = now.getFullYear();
@@ -133,6 +133,24 @@ export const DATE_PRESET_LABELS: Record<DateRangePreset, string> = {
   custom: 'Intervallo personalizzato',
 };
 
+export const COMPARE_PRESET_LABELS: Record<CompareDatePreset, string> = {
+  auto: 'Periodo precedente',
+  this_week: 'Questa settimana',
+  this_month: 'Questo mese',
+  last_month: 'Mese scorso',
+  this_year: "Quest'anno",
+  last_year: 'Anno scorso',
+  custom: 'Intervallo personalizzato',
+};
+
+export interface ResolvedComparisonPeriod {
+  rangeA: { from: string; to: string };
+  rangeB: { from: string; to: string };
+  valid: boolean;
+  isOngoingA: boolean;
+  appliedElapsedParity: boolean;
+}
+
 export function resolveDatePreset(
   preset: DateRangePreset,
   customFrom: string,
@@ -167,6 +185,148 @@ export function resolveDatePreset(
     case 'custom':
       return { from: customFrom, to: customTo };
   }
+}
+
+export function resolveComparisonPeriod(params: {
+  presetA: DateRangePreset;
+  customAFrom: string;
+  customATo: string;
+  comparePreset: CompareDatePreset;
+  compareCustomFrom: string;
+  compareCustomTo: string;
+  matchElapsed: boolean;
+  refISO?: string;
+}): ResolvedComparisonPeriod {
+  const {
+    presetA,
+    customAFrom,
+    customATo,
+    comparePreset,
+    compareCustomFrom,
+    compareCustomTo,
+    matchElapsed,
+    refISO = todayISO(),
+  } = params;
+
+  const rawA = resolveDatePreset(presetA, customAFrom, customATo, refISO);
+  const isOngoingA =
+    (presetA === 'this_week' || presetA === 'this_month' || presetA === 'this_year') &&
+    rawA.from <= refISO &&
+    refISO <= rawA.to;
+  const applyParity = isOngoingA && matchElapsed && comparePreset !== 'custom';
+
+  const { year, month, day } = parseISODate(refISO);
+  let rangeB: { from: string; to: string } = { from: '', to: '' };
+  let valid = false;
+
+  if (comparePreset === 'auto') {
+    switch (presetA) {
+      case 'all':
+        valid = false;
+        break;
+      case 'this_week': {
+        const prevMonday = addDaysISO(rawA.from, -7);
+        rangeB = {
+          from: prevMonday,
+          to: applyParity ? addDaysISO(refISO, -7) : addDaysISO(prevMonday, 6),
+        };
+        valid = true;
+        break;
+      }
+      case 'this_month': {
+        const prevYear = month === 1 ? year - 1 : year;
+        const prevMonth = month === 1 ? 12 : month - 1;
+        const m = String(prevMonth).padStart(2, '0');
+        const maxDay = daysInMonth(prevYear, prevMonth);
+        const endDay = applyParity ? Math.min(day, maxDay) : maxDay;
+        rangeB = {
+          from: `${prevYear}-${m}-01`,
+          to: `${prevYear}-${m}-${String(endDay).padStart(2, '0')}`,
+        };
+        valid = true;
+        break;
+      }
+      case 'last_month': {
+        const { year: aYear, month: aMonth } = parseISODate(rawA.from);
+        const prevYear = aMonth === 1 ? aYear - 1 : aYear;
+        const prevMonth = aMonth === 1 ? 12 : aMonth - 1;
+        const m = String(prevMonth).padStart(2, '0');
+        const last = String(daysInMonth(prevYear, prevMonth)).padStart(2, '0');
+        rangeB = { from: `${prevYear}-${m}-01`, to: `${prevYear}-${m}-${last}` };
+        valid = true;
+        break;
+      }
+      case 'this_year': {
+        const prevYear = year - 1;
+        if (applyParity) {
+          const endDay = Math.min(day, daysInMonth(prevYear, month));
+          rangeB = {
+            from: `${prevYear}-01-01`,
+            to: `${prevYear}-${String(month).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`,
+          };
+        } else {
+          rangeB = { from: `${prevYear}-01-01`, to: `${prevYear}-12-31` };
+        }
+        valid = true;
+        break;
+      }
+      case 'last_year': {
+        const { year: aYear } = parseISODate(rawA.from);
+        const prevYear = aYear - 1;
+        rangeB = { from: `${prevYear}-01-01`, to: `${prevYear}-12-31` };
+        valid = true;
+        break;
+      }
+      case 'custom': {
+        const effectiveTo = rawA.to || (rawA.from && rawA.from <= refISO ? refISO : '');
+        if (rawA.from && effectiveTo && rawA.from <= effectiveTo) {
+          const days = daysBetweenInclusive(rawA.from, effectiveTo);
+          const prevTo = addDaysISO(rawA.from, -1);
+          rangeB = { from: addDaysISO(prevTo, -(days - 1)), to: prevTo };
+          valid = true;
+        }
+        break;
+      }
+    }
+  } else if (comparePreset === 'custom') {
+    if (
+      (compareCustomFrom || compareCustomTo) &&
+      !(compareCustomFrom && compareCustomTo && compareCustomFrom > compareCustomTo)
+    ) {
+      rangeB = { from: compareCustomFrom, to: compareCustomTo };
+      valid = true;
+    }
+  } else {
+    const baseB = resolveDatePreset(comparePreset, '', '', refISO);
+    if (applyParity) {
+      if (presetA === 'this_year' && comparePreset === 'last_year') {
+        const prevYear = year - 1;
+        const endDay = Math.min(day, daysInMonth(prevYear, month));
+        rangeB = {
+          from: `${prevYear}-01-01`,
+          to: `${prevYear}-${String(month).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`,
+        };
+      } else {
+        const elapsedDays = daysBetweenInclusive(rawA.from, refISO);
+        const cappedTo = addDaysISO(baseB.from, elapsedDays - 1);
+        rangeB = {
+          from: baseB.from,
+          to: cappedTo < baseB.to ? cappedTo : baseB.to,
+        };
+      }
+    } else {
+      rangeB = baseB;
+    }
+    valid = true;
+  }
+
+  return {
+    rangeA: valid && applyParity ? { from: rawA.from, to: refISO } : rawA,
+    rangeB,
+    valid,
+    isOngoingA,
+    appliedElapsedParity: valid && applyParity,
+  };
 }
 
 export function isDateInRange(iso: string, from: string, to: string): boolean {

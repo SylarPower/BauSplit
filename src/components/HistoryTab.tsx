@@ -2,11 +2,13 @@ import { ChevronDown, ChevronUp, History } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { splitLogActorAndBody } from '../lib/audit';
 import { formatDateTimeIT } from '../lib/dates';
-import type { ActivityAction, ActivityLog } from '../types';
+import type { ActivityAction, ActivityLog, GroupMember } from '../types';
 import { Avatar } from './Icon';
 
 interface HistoryTabProps {
   logs: ActivityLog[];
+  actorLinks?: Record<string, string>;
+  members?: GroupMember[];
 }
 
 const ACTION_BADGE: Record<ActivityAction, { label: string; className: string }> = {
@@ -28,28 +30,45 @@ const ACTION_BADGE: Record<ActivityAction, { label: string; className: string }>
 
 type EntityFilter = 'all' | 'expense' | 'settlement' | 'recurring' | 'group';
 
-export function HistoryTab({ logs }: HistoryTabProps) {
+export function HistoryTab({ logs, actorLinks, members }: HistoryTabProps) {
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
   const [actorFilter, setActorFilter] = useState<string>('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  // L'autore è l'accesso che ha agito, non necessariamente l'ID del posto nei conti.
+  const canonicalActorId = (actorId: string) => actorLinks?.[actorId] ?? actorId;
+
+  const memberNameByOwner = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members ?? []) {
+      if (m.ownerId) map.set(m.ownerId, m.displayName);
+    }
+    return map;
+  }, [members]);
+
+  // L'autore è l'accesso che ha agito; eventuali accessi ospite collegati a un account vengono unificati.
   const actors = useMemo(() => {
     const names = new Map<string, string>();
-    for (const log of logs) if (!names.has(log.actorId)) names.set(log.actorId, log.actorName);
+    for (const log of logs) {
+      const id = canonicalActorId(log.actorId);
+      if (!names.has(id)) {
+        names.set(id, memberNameByOwner.get(id) ?? log.actorName);
+      } else if (log.actorId === id && !memberNameByOwner.has(id)) {
+        names.set(id, log.actorName);
+      }
+    }
     return Array.from(names);
-  }, [logs]);
+  }, [logs, actorLinks, memberNameByOwner]);
 
   const filtered = useMemo(() => {
     return logs.filter((l) => {
-      if (actorFilter !== 'all' && l.actorId !== actorFilter) return false;
+      if (actorFilter !== 'all' && canonicalActorId(l.actorId) !== actorFilter) return false;
       if (entityFilter === 'all') return true;
       if (entityFilter === 'group') {
         return ['group', 'member', 'invite', 'category'].includes(l.entityType);
       }
       return l.entityType === entityFilter;
     });
-  }, [logs, entityFilter, actorFilter]);
+  }, [logs, entityFilter, actorFilter, actorLinks]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -132,7 +151,11 @@ export function HistoryTab({ logs }: HistoryTabProps) {
               <div key={log.id} className="log-row">
                 <div className="log-top">
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                    <Avatar name={log.actorName} seed={log.actorId} size={28} />
+                    <Avatar
+                      name={log.actorName}
+                      seed={canonicalActorId(log.actorId)}
+                      size={28}
+                    />
                     <div>
                       <div style={{ fontSize: 14, lineHeight: 1.45 }}>
                         <strong>{line.lead}</strong>{' '}

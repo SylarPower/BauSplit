@@ -831,7 +831,9 @@ export function GroupView({
           />
         )}
 
-        {tab === 'history' && <HistoryTab logs={activityLogs} />}
+        {tab === 'history' && (
+          <HistoryTab logs={activityLogs} actorLinks={data.actorLinks} members={members} />
+        )}
       </div>
 
       {/* Bottone mobile rapido "+ Spesa" */}

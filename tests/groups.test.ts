@@ -194,6 +194,14 @@ describe('Gruppi BauSplit su PostgreSQL con accessi distinti', () => {
         [local.id]
       )
     ).toEqual({ actor_id: guest, actor_name: 'Anna' });
+    expect((await db.query('select * from get_group_actor_links($1)', [local.id])).rows).toEqual([
+      { guest_id: guest, account_id: account },
+    ]);
+    await as(outsider);
+    await expect(db.query('select * from get_group_actor_links($1)', [local.id])).rejects.toThrow(
+      /Accesso non consentito/
+    );
+    await as(account);
     expect(
       (
         await db.query('select * from group_members where group_id=$1 and left_at is null', [
