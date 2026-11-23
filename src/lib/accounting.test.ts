@@ -10,6 +10,7 @@ import {
 import { buildExpenseUpdatedLog } from './audit';
 import { parseDecimalInput } from './currencies';
 import { generateGroupCsv } from './csv';
+import { DATE_PRESET_LABELS, resolveDatePreset } from './dates';
 import { advanceRecurringDate, collectDueOccurrences } from './recurring';
 import { extractInviteToken } from './supabase';
 
@@ -380,5 +381,58 @@ describe('ricorrenze, numeri, inviti, audit e CSV', () => {
     expect(csv).toContain('"Cena, pizzeria ""Da Mario"""');
     expect(csv).toContain('1.18');
     expect(csv).toContain('59.00');
+  });
+
+  it('risolve i filtri temporali nell’ordine e negli intervalli attesi', () => {
+    expect(Object.values(DATE_PRESET_LABELS)).toEqual([
+      'Tutto il periodo',
+      'Questa settimana',
+      'Questo mese',
+      'Mese scorso',
+      "Quest'anno",
+      'Anno scorso',
+      'Intervallo personalizzato',
+    ]);
+
+    expect(resolveDatePreset('all', '2026-01-01', '2026-01-31', '2026-11-20')).toEqual({
+      from: '',
+      to: '',
+    });
+    expect(resolveDatePreset('this_week', '', '', '2026-11-20')).toEqual({
+      from: '2026-11-16',
+      to: '2026-11-22',
+    });
+    expect(resolveDatePreset('this_week', '', '', '2026-11-16')).toEqual({
+      from: '2026-11-16',
+      to: '2026-11-22',
+    });
+    expect(resolveDatePreset('this_week', '', '', '2026-11-22')).toEqual({
+      from: '2026-11-16',
+      to: '2026-11-22',
+    });
+    expect(resolveDatePreset('this_week', '', '', '2026-01-01')).toEqual({
+      from: '2025-12-29',
+      to: '2026-01-04',
+    });
+    expect(resolveDatePreset('this_month', '', '', '2026-11-20')).toEqual({
+      from: '2026-11-01',
+      to: '2026-11-30',
+    });
+    expect(resolveDatePreset('last_month', '', '', '2026-01-15')).toEqual({
+      from: '2025-12-01',
+      to: '2025-12-31',
+    });
+    expect(resolveDatePreset('this_year', '', '', '2026-11-20')).toEqual({
+      from: '2026-01-01',
+      to: '2026-12-31',
+    });
+    expect(resolveDatePreset('last_year', '', '', '2026-11-20')).toEqual({
+      from: '2025-01-01',
+      to: '2025-12-31',
+    });
+    expect(resolveDatePreset('custom', '2026-03-10', '2026-03-20', '2026-11-20')).toEqual({
+      from: '2026-03-10',
+      to: '2026-03-20',
+    });
   });
 });

@@ -125,11 +125,11 @@ export function formatDateTimeIT(isoTimestamp: string): string {
 
 export const DATE_PRESET_LABELS: Record<DateRangePreset, string> = {
   all: 'Tutto il periodo',
+  this_week: 'Questa settimana',
   this_month: 'Questo mese',
   last_month: 'Mese scorso',
-  last_30_days: 'Ultimi 30 giorni',
-  last_3_months: 'Ultimi 3 mesi',
   this_year: "Quest'anno",
+  last_year: 'Anno scorso',
   custom: 'Intervallo personalizzato',
 };
 
@@ -139,10 +139,15 @@ export function resolveDatePreset(
   customTo: string,
   refISO: string = todayISO()
 ): { from: string; to: string } {
-  const { year, month } = parseISODate(refISO);
+  const { year, month, day } = parseISODate(refISO);
   switch (preset) {
     case 'all':
       return { from: '', to: '' };
+    case 'this_week': {
+      const dow = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+      const monday = addDaysISO(refISO, -((dow + 6) % 7));
+      return { from: monday, to: addDaysISO(monday, 6) };
+    }
     case 'this_month': {
       const m = String(month).padStart(2, '0');
       const last = String(daysInMonth(year, month)).padStart(2, '0');
@@ -155,12 +160,10 @@ export function resolveDatePreset(
       const last = String(daysInMonth(prevYear, prevMonth)).padStart(2, '0');
       return { from: `${prevYear}-${m}-01`, to: `${prevYear}-${m}-${last}` };
     }
-    case 'last_30_days':
-      return { from: addDaysISO(refISO, -29), to: refISO };
-    case 'last_3_months':
-      return { from: addDaysISO(refISO, -89), to: refISO };
     case 'this_year':
       return { from: `${year}-01-01`, to: `${year}-12-31` };
+    case 'last_year':
+      return { from: `${year - 1}-01-01`, to: `${year - 1}-12-31` };
     case 'custom':
       return { from: customFrom, to: customTo };
   }
