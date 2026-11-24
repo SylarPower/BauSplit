@@ -1,4 +1,4 @@
-import { Archive, ArrowLeftRight, ArrowRight, PawPrint, Pencil } from 'lucide-react';
+import { Archive, ArrowRight, PawPrint, Pencil } from 'lucide-react';
 import { roundCurrency } from '../lib/accounting';
 import { formatMoney, type ExchangeRateResult } from '../lib/currencies';
 import { formatFullDateIT } from '../lib/dates';
@@ -21,7 +21,6 @@ interface BalancesTabProps {
   settlements: Settlement[];
   nameOf: (userId: string) => string;
   onSettleTransfer: (transfer: SimplifiedTransfer) => void;
-  onNewCustomSettlement: () => void;
   onEditSettlement: (st: Settlement) => void;
   onOpenCloseGroup: () => void;
 }
@@ -38,7 +37,6 @@ export function BalancesTab({
   settlements,
   nameOf,
   onSettleTransfer,
-  onNewCustomSettlement,
   onEditSettlement,
   onOpenCloseGroup,
 }: BalancesTabProps) {
@@ -60,25 +58,7 @@ export function BalancesTab({
   return (
     <div className="section-stack">
       {/* Piano semplificato di rimborso */}
-      <section>
-        <div className="section-head">
-          <div>
-            <h2 className="section-title">Come pareggiare i conti</h2>
-            <p className="field-hint">
-              Saldi compensati tra tutti i partecipanti per ridurre il numero di pagamenti.
-            </p>
-          </div>
-          {canEdit && balances.length >= 2 && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={onNewCustomSettlement}
-            >
-              <ArrowLeftRight size={14} />
-              Registra rimborso
-            </button>
-          )}
-        </div>
+      <section aria-label="Come pareggiare i conti">
 
         {transfers.length === 0 ? (
           <div className="card empty-state" style={{ padding: '32px 20px' }}>
