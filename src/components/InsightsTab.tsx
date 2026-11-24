@@ -404,26 +404,6 @@ export function InsightsTab({
         </div>
       ) : (
         <>
-          <div className={`card kpi-card${comparisonInsights ? ' kpi-card-compare' : ''}`}>
-            <div className="kpi-card-main">
-              <div className="kpi-label">Totale speso</div>
-              <div className="kpi-value tabular">
-                {formatMoney(insights.totalSpent, baseCurrency)}
-              </div>
-            </div>
-            {comparisonInsights && totalDelta && (
-              <div className="kpi-compare-row tabular">
-                <span className="field-hint">
-                  Confronto:{' '}
-                  <strong>{formatMoney(comparisonInsights.totalSpent, baseCurrency)}</strong>
-                </span>
-                <span className={deltaBadgeClass(totalDelta)}>
-                  {formatComparisonDelta(totalDelta, baseCurrency, false)}
-                </span>
-              </div>
-            )}
-          </div>
-
           {/* Ripartizione per categoria */}
           <section className="card card-pad">
             <div className="section-head" style={{ marginBottom: 16 }}>
@@ -435,6 +415,17 @@ export function InsightsTab({
                     : 'Clicca una categoria per vedere le relative spese.'}
                 </p>
               </div>
+              {comparisonInsights && totalDelta && (
+                <div className="insights-total-compare tabular">
+                  <span className="field-hint">
+                    Confronto:{' '}
+                    <strong>{formatMoney(comparisonInsights.totalSpent, baseCurrency)}</strong>
+                  </span>
+                  <span className={deltaBadgeClass(totalDelta)}>
+                    {formatComparisonDelta(totalDelta, baseCurrency, false)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="insights-cat-layout">
