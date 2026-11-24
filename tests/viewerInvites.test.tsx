@@ -96,14 +96,25 @@ function openGroup(d = data, editor = false, repo: Partial<DataRepository> = {})
   return { ...render(<GroupView {...props} />), props };
 }
 
-it('mostra il saldo solo in Spese e Saldi, nasconde la dicitura superflua e limita Aggiungi spesa al tab Spese', () => {
+it('mostra il saldo cliccabile solo in Spese senza pulsanti superflui e semplifica la vista Saldi', () => {
   const { container } = openGroup(data, true, {});
   const balance = () => screen.queryByRole('region', { name: 'Riepilogo del tuo saldo' });
   const addButtons = () => container.querySelectorAll('.mobile-fab,.desktop-add-expense');
 
   expect(balance()).toBeTruthy();
   expect(screen.queryByText('Saldo semplificato aggiornato')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Segna rimborso' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Vedi saldi' })).toBeNull();
   expect(addButtons()).toHaveLength(2);
+
+  // Cliccando la card del saldo in Spese si passa direttamente a Saldi
+  fireEvent.click(within(balance()!).getByRole('button'));
+  expect(balance()).toBeNull();
+  expect(screen.queryByText('Come pareggiare i conti')).toBeNull();
+  expect(screen.queryByText(/Saldi compensati tra tutti i partecipanti/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Registra rimborso' })).toBeNull();
+  expect(screen.getByText('Saldo per persona')).toBeTruthy();
+  expect(addButtons()).toHaveLength(0);
 
   click('Insights');
   expect(balance()).toBeNull();
@@ -120,9 +131,10 @@ it('mostra il saldo solo in Spese e Saldi, nasconde la dicitura superflua e limi
   expect(addButtons()).toHaveLength(0);
 
   click('Saldi');
-  expect(balance()).toBeTruthy();
-  expect(screen.queryByText('Saldo semplificato aggiornato')).toBeNull();
+  expect(balance()).toBeNull();
   expect(screen.queryByText('Valuta di visualizzazione dei saldi')).toBeNull();
+  expect(screen.queryByText('Come pareggiare i conti')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Registra rimborso' })).toBeNull();
   expect(addButtons()).toHaveLength(0);
 });
 
@@ -152,18 +164,24 @@ it('sostituisce la card valuta di Saldi con il badge interattivo e popover ricco
   fireEvent.click(within(popover).getByRole('option', { name: /USD/ }));
 
   await waitFor(() => {
-    expect(screen.getByText(/mostrato in USD/)).toBeTruthy();
+    expect(badgeBtn.textContent).toContain('Vista USD · base EUR');
+    expect(screen.getAllByText(/19,44/).length).toBeGreaterThan(0);
   });
-  expect(badgeBtn.textContent).toContain('Vista USD · base EUR');
-  expect(screen.getAllByText(/19,44/).length).toBeGreaterThan(0);
+
+  // In Spese anche il riepilogo del tuo saldo riflette la valuta scelta
+  click('Spese');
+  expect(screen.getByText(/mostrato in USD/)).toBeTruthy();
 
   // Riaprendo il popover mostra il dettaglio BCE e permette il reset
+  click('Saldi');
   fireEvent.click(badgeBtn);
   const openPopover = screen.getByRole('region', { name: 'Visualizza saldi in' });
   expect(openPopover.textContent).toContain('1 EUR = 1,08 USD');
   fireEvent.click(within(openPopover).getByRole('button', { name: 'Torna a EUR' }));
 
   expect(badgeBtn.textContent).toBe('EUR');
+  expect(screen.queryByText(/19,44/)).toBeNull();
+  click('Spese');
   expect(screen.queryByText(/mostrato in USD/)).toBeNull();
 });
 

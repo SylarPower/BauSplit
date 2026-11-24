@@ -825,7 +825,30 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
-  flex-wrap: wrap;
+}
+
+.group-summary-bar-link {
+  width: 100%;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.group-summary-bar-link:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.group-summary-bar-link:active {
+  transform: scale(0.995);
+}
+
+.summary-balance-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.summary-balance-chevron {
+  flex-shrink: 0;
 }
 
 .summary-balance-label {
@@ -847,13 +870,6 @@ textarea:focus-visible {
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 2px;
-}
-
-.summary-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 /* ── Navigazione schede Gruppo ── */

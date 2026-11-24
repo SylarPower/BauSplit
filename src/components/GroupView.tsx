@@ -2,8 +2,8 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  ArrowLeftRight,
   BarChart3,
+  ChevronRight,
   History,
   Info,
   Eye,
@@ -198,13 +198,6 @@ export function GroupView({
   );
 
   const myBalance = balances.find((b) => b.userId === currentUserId)?.netBalance ?? 0;
-  const myPrimaryTransfer = useMemo(
-    () =>
-      transfers.find((t) => t.fromUser === currentUserId) ??
-      transfers.find((t) => t.toUser === currentUserId) ??
-      null,
-    [transfers, currentUserId]
-  );
 
   const isConvertedDisplay =
     displayCurrency !== group.baseCurrency && displayRate !== null && displayRate.rate > 0;
@@ -710,50 +703,37 @@ export function GroupView({
         )}
 
         {/* Riepilogo saldo rapido */}
-        {(tab === 'expenses' || tab === 'balances') && (
-          <section className="card group-summary-bar" aria-label="Riepilogo del tuo saldo">
-            <div>
-              <div className="summary-balance-label">
-                Il tuo saldo
-                {isConvertedDisplay ? ` (mostrato in ${displayCurrency})` : ''}
+        {tab === 'expenses' && (
+          <section aria-label="Riepilogo del tuo saldo">
+            <button
+              type="button"
+              className="card group-summary-bar group-summary-bar-link"
+              onClick={() => setTab('balances')}
+              title="Vai a Saldi"
+            >
+              <div className="summary-balance-main">
+                <div className="summary-balance-label">
+                  Il tuo saldo
+                  {isConvertedDisplay ? ` (mostrato in ${displayCurrency})` : ''}
+                </div>
+                <div
+                  className={`summary-balance-value tabular ${
+                    balanceHeadline.tone === 'positive'
+                      ? 'text-positive'
+                      : balanceHeadline.tone === 'negative'
+                        ? 'text-negative'
+                        : ''
+                  }`}
+                >
+                  {balanceHeadline.title}
+                </div>
+                {balanceHeadline.sub && (
+                  <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
+                )}
               </div>
-              <div
-                className={`summary-balance-value tabular ${
-                  balanceHeadline.tone === 'positive'
-                    ? 'text-positive'
-                    : balanceHeadline.tone === 'negative'
-                      ? 'text-negative'
-                      : ''
-                }`}
-              >
-                {balanceHeadline.title}
-              </div>
-              {balanceHeadline.sub && (
-                <div className="summary-balance-sub tabular">{balanceHeadline.sub}</div>
-              )}
-            </div>
 
-            <div className="summary-actions">
-              {canEdit && myPrimaryTransfer && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => openSettleTransfer(myPrimaryTransfer)}
-                >
-                  <ArrowLeftRight size={14} />
-                  Segna rimborso
-                </button>
-              )}
-              {tab !== 'balances' && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setTab('balances')}
-                >
-                  Vedi saldi
-                </button>
-              )}
-            </div>
+              <ChevronRight size={18} className="text-muted summary-balance-chevron" aria-hidden="true" />
+            </button>
           </section>
         )}
 
@@ -823,11 +803,6 @@ export function GroupView({
             settlements={settlements}
             nameOf={nameOf}
             onSettleTransfer={openSettleTransfer}
-            onNewCustomSettlement={() => {
-              setEditingSettlement(null);
-              setPrefillTransfer(null);
-              setSettlementModalOpen(true);
-            }}
             onEditSettlement={(st) => {
               setEditingSettlement(st);
               setPrefillTransfer(null);
