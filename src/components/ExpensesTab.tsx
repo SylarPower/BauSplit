@@ -342,7 +342,7 @@ export function ExpensesTab({
           <input
             type="search"
             className="input"
-            placeholder="Cerca per descrizione, nota, persona o importo…"
+            placeholder="Cerca"
             value={filters.search}
             onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
           />

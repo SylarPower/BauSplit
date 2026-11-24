@@ -107,6 +107,12 @@ it('mostra il saldo cliccabile solo in Spese senza pulsanti superflui e semplifi
   expect(screen.queryByRole('button', { name: 'Vedi saldi' })).toBeNull();
   expect(addButtons()).toHaveLength(2);
 
+  const searchInput = screen.getByPlaceholderText('Cerca');
+  expect(screen.queryByPlaceholderText(/Cerca per descrizione/)).toBeNull();
+  fireEvent.change(searchInput, { target: { value: 'Cena' } });
+  expect(container.querySelectorAll('.search-clear')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancella ricerca' }));
+
   // Cliccando la card del saldo in Spese si passa direttamente a Saldi
   fireEvent.click(within(balance()!).getByRole('button'));
   expect(balance()).toBeNull();
@@ -119,7 +125,12 @@ it('mostra il saldo cliccabile solo in Spese senza pulsanti superflui e semplifi
   click('Insights');
   expect(balance()).toBeNull();
   expect(addButtons()).toHaveLength(0);
-  expect(screen.getByText('Totale speso')).toBeTruthy();
+  expect(container.querySelector('.kpi-card')).toBeNull();
+  expect(screen.queryByText('Totale speso')).toBeNull();
+  const donut = container.querySelector('.donut-wrap') as HTMLElement;
+  expect(donut).toBeTruthy();
+  expect(within(donut).getByText('Totale')).toBeTruthy();
+  expect(within(donut).getByText(/40,00/)).toBeTruthy();
   expect(screen.queryByText(/Numero di spese|Spesa media|\/giorno/i)).toBeNull();
 
   click(/^Ricorrenti/);
